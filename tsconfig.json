@@ -1,8 +1,8 @@
 {
   "compilerOptions": {
     "target": "ES2022",
-    "module": "NodeNext",
-    "moduleResolution": "NodeNext",
+    "module": "esnext",
+    "moduleResolution": "bundler",
     "outDir": "dist",
     "strict": true,
     "noUncheckedIndexedAccess": true,
@@ -10,7 +10,9 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "jsx":"react-jsx",
-    "types":["vite/client"]
+    "types":["vite/client"],
+    "allowImportingTsExtensions": true,
+    "noEmit": true
   },
   "include": ["apps", "modules", "shared", "integrations", "db", "tests"]
 }
