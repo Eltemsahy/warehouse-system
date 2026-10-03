@@ -9,6 +9,7 @@ docker compose up -d db
 npm install
 npm run migrate
 npm run dev          # http://localhost:3000/health
+
 npm test
 npm run lint:deps    # verifies module boundaries
 ```
