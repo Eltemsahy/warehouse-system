@@ -8,7 +8,8 @@
     "noUncheckedIndexedAccess": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
-    "forceConsistentCasingInFileNames": true
+    "forceConsistentCasingInFileNames": true,
+    "jsx":"react-jsx"
   },
   "include": ["apps", "modules", "shared", "integrations", "db", "tests"]
 }
