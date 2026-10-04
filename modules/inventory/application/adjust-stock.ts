@@ -1,5 +1,6 @@
 import { err, ok, type Result } from "../../../shared/kernel/index.js";
 import type { InMemoryEventBus } from "../../../shared/events/index.js";
+import { InsufficientStockError } from "../domain/errors.js";
 import { createMovement, type StockMovement } from "../domain/stock-movement.js";
 import { stockAdjusted } from "../domain/events.js";
 import type { StockLedger } from "./ports.js";
@@ -18,7 +19,12 @@ export class AdjustStock {
       sku: i.sku, locationId: i.locationId, quantityDelta: i.delta,
       type: "ADJUSTMENT", reason: i.reason,
     });
-    await this.ledger.append([movement]);
+    try {
+      await this.ledger.append([movement]);
+    } catch (e) {
+      if (e instanceof InsufficientStockError) return err(e);
+      throw e;
+    }
     await this.bus.publish([stockAdjusted(movement)]);
     return ok(movement);
   }

@@ -18,3 +18,4 @@ export function createInventoryModule(deps: { bus: InMemoryEventBus; ledger?: St
   };
 }
 export type { StockLedger } from "./application/ports.js";
+export { PgStockLedger } from "./infrastructure/pg-stock-ledger.js";

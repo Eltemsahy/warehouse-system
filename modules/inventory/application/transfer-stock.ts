@@ -1,5 +1,6 @@
 import { err, newId, ok, type Result } from "../../../shared/kernel/index.js";
 import type { InMemoryEventBus } from "../../../shared/events/index.js";
+import { InsufficientStockError } from "../domain/errors.js";
 import { createMovement } from "../domain/stock-movement.js";
 import { stockTransferred } from "../domain/events.js";
 import type { StockLedger } from "./ports.js";
@@ -17,10 +18,15 @@ export class TransferStock {
     }
     const transferId = newId();
     // Both legs are appended in ONE atomic call.
-    await this.ledger.append([
-      createMovement({ sku: i.sku, locationId: i.from, quantityDelta: -i.quantity, type: "TRANSFER_OUT", referenceId: transferId }),
-      createMovement({ sku: i.sku, locationId: i.to, quantityDelta: i.quantity, type: "TRANSFER_IN", referenceId: transferId }),
-    ]);
+    try {
+      await this.ledger.append([
+        createMovement({ sku: i.sku, locationId: i.from, quantityDelta: -i.quantity, type: "TRANSFER_OUT", referenceId: transferId }),
+        createMovement({ sku: i.sku, locationId: i.to, quantityDelta: i.quantity, type: "TRANSFER_IN", referenceId: transferId }),
+      ]);
+    } catch (e) {
+      if (e instanceof InsufficientStockError) return err(e);
+      throw e;
+    }
     await this.bus.publish([stockTransferred(i)]);
     return ok({ transferId });
   }

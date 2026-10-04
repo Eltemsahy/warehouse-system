@@ -21,8 +21,18 @@ curl -X POST localhost:3000/inventory/adjustments -H 'content-type: application/
 curl localhost:3000/inventory/SKU-1/locations/A-01/balance
 ```
 
+## Inventory storage
+The inventory ledger uses PostgreSQL by default. To use temporary in-memory storage instead, set `LEDGER_DRIVER` in PowerShell before starting the app:
+```powershell
+
+$env:LEDGER_DRIVER = "memory"
+npm run dev
+
+```
+In-memory data is kept only while the app is running. The app reads environment variables directly; it does not automatically load values from `.env`.
+
 ## Layout
 `apps/` entrypoints, `modules/` domain modules (api > application > domain <- infrastructure), `shared/` kernel/events/observability, `integrations/` external adapters, `db/` migrations, `docs/` ADRs and glossary.
 
 ## Status
-`inventory` is implemented with an in-memory ledger (Postgres ledger is next; schema is in `db/migrations`). Other modules are empty scaffolds.
+`inventory` supports in-memory and PostgreSQL ledgers. Other modules are empty scaffolds.
