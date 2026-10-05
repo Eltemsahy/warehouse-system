@@ -12,6 +12,10 @@ npm run dev          # http://localhost:3000/health
 
 npm test
 npm run lint:deps    # verifies module boundaries
+
+cd apps/web-admin
+npm install
+npm run dev          # start the frontend
 ```
 
 ## Try it

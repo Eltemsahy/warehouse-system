@@ -23,32 +23,46 @@ warehouse-system/
 │   │       ├── app.ts                  # Composition root: creates the event bus, wires modules, mounts routes
 │   │       └── config.ts               # Validates env vars with zod and exports typed config
 │   │
-│   ├── mobile-scanner/
-│   │   └── README.md                   # Placeholder: handheld/PWA for pickers, offline queue notes
-│   │
 │   └── web-admin/                      # React + Vite back-office UI (own package.json and toolchain)
 │       ├── .gitignore                  # Vite template ignores (logs, dist, editor files)
 │       ├── README.md                   # Vite template readme
 │       ├── eslint.config.js            # Frontend ESLint config (react-hooks, react-refresh)
 │       ├── index.html                  # HTML shell that loads src/main.tsx
-│       ├── package.json                # Frontend deps and scripts (dev, build, lint, preview)
+│       ├── package.json                # Frontend deps and scripts (dev, build, lint, preview); Tailwind CSS 4
 │       ├── package-lock.json           # Frontend dependency lockfile
 │       ├── tsconfig.json               # Project references to the app and node configs
 │       ├── tsconfig.app.json           # TypeScript settings for src/ (bundler mode)
 │       ├── tsconfig.node.json          # TypeScript settings for vite.config.ts
-│       ├── vite.config.ts              # Vite config with the React plugin
+│       ├── vite.config.ts              # Vite config with React and Tailwind CSS plugins
 │       ├── public/
-│       │   ├── favicon.svg             # Browser tab icon (Vite default)
-│       │   └── icons.svg               # SVG sprite used by the template landing page
+│       │   ├── favicon.svg             # Browser tab icon
+│       │   └── icons.svg               # SVG sprite retained from the Vite template
 │       └── src/
-│           ├── main.tsx                # React entrypoint: mounts <App /> into #root
-│           ├── App.tsx                 # Root component (still the Vite starter page)
-│           ├── App.css                 # Styles for the starter page
-│           ├── index.css               # Global styles and light/dark theme variables
+│           ├── main.tsx                # React entrypoint: imports global Tailwind styles and mounts <App />
+│           ├── App.tsx                 # App composition: wraps the landing page in the shared app layout
+│           ├── index.css               # Tailwind CSS import, theme tokens, and small global accessibility styles
+│           ├── components/
+│           │   ├── layout/
+│           │   │   ├── AppLayout.tsx    # Shared page shell: site header, page content, and footer
+│           │   │   ├── SiteHeader.tsx   # Brand, primary navigation, and platform call to action
+│           │   │   └── SiteFooter.tsx   # Brand and project footer links
+│           │   └── ui/
+│           │       ├── ArrowIcon.tsx    # Reusable directional and diagonal arrow icon
+│           │       └── BrandMark.tsx    # Reusable Cargo logo mark
+│           ├── pages/
+│           │   └── LandingPage.tsx      # Landing page composition
+│           ├── features/
+│               └── landing/
+│                   ├── components/
+│                   │   ├── HeroSection.tsx         # Landing hero and warehouse preview placement
+│                   │   ├── DashboardPreview.tsx    # Illustrative, sample-data warehouse dashboard
+│                   │   └── WorkflowSection.tsx    # Receiving, inventory, and fulfillment overview
+│                   └── data/
+│                       └── previewData.ts          # Sample dashboard metrics, movements, locations, and steps
 │           └── assets/
-│               ├── hero.png            # Starter-page image (binary, imported by App.tsx)
-│               ├── react.svg           # React logo
-│               └── vite.svg            # Vite logo
+│               ├── hero.png            # Unused asset retained from the Vite starter template
+│               ├── react.svg           # Unused React logo retained from the Vite starter template
+│               └── vite.svg            # Unused Vite logo retained from the Vite starter template
 │
 ├── modules/
 │   ├── inventory/                      # The only implemented module
