@@ -1,0 +1,133 @@
+BACKEND ORGANIZATION & DESIGN
+=============================
+Target scale: 100+ entities. Stack: TypeScript, Express, Postgres.
+Style: modular monolith, one deployable, one DB, one schema per module.
+
+1. THE RULES (keep these and it stays manageable)
+-------------------------------------------------
+1. A module owns its tables. No other module reads or writes them.
+2. Modules talk only through (a) the module's index.ts or (b) domain events.
+3. Dependencies point inward: api -> application -> domain <- infrastructure.
+4. Domain code is pure: no Express, no pg, no I/O.
+5. Every stock/state change that must be atomic happens in ONE transaction.
+6. Enforced by tooling: `npm run lint:deps` (dependency-cruiser) in CI.
+
+2. MODULES AND ENTITY BUDGET
+----------------------------
+Group entities by who changes them together, not by table count.
+
+  catalog      (8-12)   Product/SKU, UoM, UoM conversion, barcode, category,
+                        batch/lot, serial, product-supplier
+  locations    (6-10)   Warehouse, zone, aisle, bin, location type, capacity
+  inventory    (10-15)  StockMovement (ledger), StockLevel, Reservation,
+                        CycleCount(+line), StockStatus, LPN/pallet
+  inbound      (10-15)  Supplier, PurchaseOrder(+line), ASN, Receipt(+line),
+                        PutawayTask, PutawayRule, QcInspection
+  outbound     (15-20)  Customer, SalesOrder(+line), Allocation, Wave,
+                        PickList, PickTask, PackTask, Carton, Return(+line)
+  shipping     (10-15)  Carrier, ServiceLevel, Shipment(+line), Label,
+                        TrackingEvent, Manifest, RateTable
+  transport    (8-12)   Vehicle, Driver, Route, Trip, Stop, Dock, Appointment
+  identity     (8-10)   User, Role, Permission, UserWarehouse, Device, Audit
+  platform     (8-12)   Outbox, EventLog, Settings, Notification, Attachment,
+                        NumberSequence, IntegrationMapping
+  reporting    (5-10)   Read models, KPI snapshots
+
+  Rule of thumb: if a module passes ~20 tables, split it by sub-domain.
+
+3. FOLDER LAYOUT INSIDE A MODULE
+--------------------------------
+  modules/<name>/
+    index.ts            PUBLIC interface only (factory + types + query fns)
+    api/                routes, DTOs, zod schemas
+    application/        one file per use case, plus ports.ts (interfaces)
+    domain/             entities, value objects, events, errors, rules
+    infrastructure/     pg repositories, queries, mappers
+
+  When a module grows, group by aggregate inside each layer:
+    domain/receipt/, application/receipt/, infrastructure/receipt/
+  Do not add a layer; add subfolders.
+
+4. DATA DESIGN
+--------------
+- Schema per module (inventory.*, inbound.*). Migrations are plain SQL files
+  in db/migrations, numbered NNN_<module>_<change>.sql, never edited after merge.
+- IDs: uuid for entities. Human-facing numbers (PO-000123) come from
+  platform.number_sequences, separate from the id.
+- Cross-module references are plain id columns with NO foreign key to another
+  module's schema. Validate through the other module's public interface.
+  (Foreign keys inside a module are fine and encouraged.)
+- Header/line pairs are one aggregate: load and save together.
+- Inventory is an append-only ledger. Corrections are new movements.
+  stock_levels is a cached balance updated in the same transaction, guarded
+  by CHECK (quantity >= 0).
+- Money: integer minor units + currency code. Quantities: integer in base UoM.
+- Every table: id, created_at, updated_at. Add tenant_id from day one ONLY if
+  3PL multi-tenancy is a real requirement (Shall be added).
+- Soft delete only where users need undelete. Prefer status columns.
+
+5. HOW MODULES COOPERATE
+------------------------
+- Query (need an answer now): call the other module's index.ts function.
+    e.g. outbound asks inventory.getBalance(sku, location)
+- Command that must be atomic with yours: keep it inside your module.
+- Reaction (something happened): publish a domain event, others subscribe.
+    e.g. inbound publishes inbound.ReceiptConfirmed -> inventory records stock
+- Events are written to platform.outbox in the SAME transaction as the state
+  change; a relay publishes them. Handlers must be idempotent.
+- Event names: <module>.<PastTenseFact>. Payloads are small and versioned.
+
+6. API CONVENTIONS
+------------------
+- REST, JSON, one router per module mounted at /<module>.
+- Validate all input with zod at the edge; use cases take plain typed input.
+- Use cases return Result<T, E>; routes map errors to HTTP:
+    validation 400, not found 404, business rule 422, conflict 409.
+- Mutating endpoints that scanners call accept an Idempotency-Key header.
+- List endpoints: cursor pagination (limit + cursor), stable sort, filters
+  as query params. Never return unbounded lists.
+- Version by path (/v1) only when a breaking change is unavoidable.
+
+7. CONCURRENCY AND RELIABILITY
+------------------------------
+- Lock rows in a fixed order (sku, location) to avoid deadlocks.
+- Let DB constraints be the final guard; app checks are only for good errors.
+- Optimistic locking (version column) for documents edited by people.
+- Background work (outbox relay, allocation waves) runs as separate workers
+  started from apps/ entrypoints, same codebase.
+
+8. TESTING
+----------
+- domain/      unit tests, no I/O, fast.
+- application/ use-case tests with in-memory ports.
+- infrastructure/ + api: integration tests against real Postgres.
+- tests/e2e    a few full flows (receive -> putaway -> allocate -> ship).
+- tests/contract  one test per public module interface and event payload.
+
+9. ADDING A NEW MODULE OR ENTITY (checklist)
+--------------------------------------------
+  1. Migration in db/migrations (own schema, indexes, constraints).
+  2. domain/: entity + rules + events.
+  3. application/: use case + port interface.
+  4. infrastructure/: pg repository implementing the port.
+  5. api/: route + zod schema.
+  6. index.ts: export factory and only what others need.
+  7. Wire in apps/api/src/app.ts (the only wiring point).
+  8. Tests, then `npm run typecheck && npm run lint:deps && npm test`.
+
+10. BUILD ORDER
+---------------
+  1. inventory: pg ledger (done) + outbox in same transaction
+  2. catalog + locations (so SKU/location ids are validated)
+  3. identity (auth, roles) before exposing anything real
+  4. inbound (receive, putaway) -> feeds inventory via events
+  5. outbound (allocate, pick, pack) -> reserves via inventory
+  6. shipping, then transport
+  7. reporting last, from read models built on events
+
+11. WHEN TO SPLIT FURTHER
+-------------------------
+Only when a module has a clear scaling or team-ownership reason. Because
+modules already share nothing except interfaces and events, extraction means
+moving the folder, giving it its own DB, and replacing index.ts calls with
+HTTP/messages.
