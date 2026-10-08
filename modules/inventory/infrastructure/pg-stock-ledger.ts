@@ -26,15 +26,24 @@ export class PgStockLedger implements StockLedger {
            VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
           [m.id, m.sku, m.locationId, m.quantityDelta, m.type, m.reason ?? null, m.referenceId ?? null, m.occurredAt],
         );
-        // Upsert takes a row lock; the CHECK (quantity >= 0) rejects overdrafts.
-        await client.query(
-          `INSERT INTO inventory.stock_levels (sku, location_id, quantity)
-           VALUES ($1,$2,$3)
-           ON CONFLICT (sku, location_id) DO UPDATE
-             SET quantity = inventory.stock_levels.quantity + EXCLUDED.quantity,
-                 version  = inventory.stock_levels.version + 1`,
+        const updated = await client.query(
+          `UPDATE inventory.stock_levels
+              SET quantity = quantity + $3,
+                  version  = version + 1
+            WHERE sku = $1 AND location_id = $2`,
           [m.sku, m.locationId, m.quantityDelta],
         );
+        if (updated.rowCount === 0) {
+          if (m.quantityDelta < 0) throw new InsufficientStockError();
+          await client.query(
+            `INSERT INTO inventory.stock_levels (sku, location_id, quantity)
+             VALUES ($1,$2,$3)
+             ON CONFLICT (sku, location_id) DO UPDATE
+               SET quantity = inventory.stock_levels.quantity + EXCLUDED.quantity,
+                   version  = inventory.stock_levels.version + 1`,
+            [m.sku, m.locationId, m.quantityDelta],
+          );
+        }
       }
       await client.query("COMMIT");
     } catch (e) {

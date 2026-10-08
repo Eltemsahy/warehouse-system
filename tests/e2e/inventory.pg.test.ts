@@ -21,4 +21,16 @@ describe.skipIf(!enabled)("inventory (postgres)", () => {
     expect(results.filter((r) => r.ok)).toHaveLength(10);
     expect(await inv.getBalance(sku, "A-01")).toBe(0);
   });
+
+  it("transfers stock from an existing balance", async () => {
+    const inv = createInventoryModule({ bus: new InMemoryEventBus(), ledger: new PgStockLedger(pool) });
+    const sku = `SKU-${Date.now()}`;
+    await inv.adjust.execute({ sku, locationId: "A-01", delta: 10, reason: "seed" });
+
+    const result = await inv.transfer.execute({ sku, from: "A-01", to: "B-02", quantity: 4 });
+
+    expect(result.ok).toBe(true);
+    expect(await inv.getBalance(sku, "A-01")).toBe(6);
+    expect(await inv.getBalance(sku, "B-02")).toBe(4);
+  });
 });
