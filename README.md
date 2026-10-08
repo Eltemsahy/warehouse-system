@@ -5,7 +5,54 @@ Modular monolith (TypeScript, Express, Postgres). See `docs/adr/` for decisions.
 ## Quick start
 ```bash
 cp .env.example .env
+
+## Database setup
+
+The app needs a PostgreSQL database reachable via `DATABASE_URL`. Docker is **optional**: pick whichever option suits you.
+
+### Option A: Docker (quickest)
+
+Requires Docker Desktop (or the Docker engine) to be running.
+
+```bash
 docker compose up -d db
+```
+
+This starts Postgres 16 with user `wms`, password `wms`, and database `wms` on port 5432, matching the defaults in `.env.example`.
+
+### Option B: Local PostgreSQL (no Docker)
+
+1. Install PostgreSQL (16 or newer).
+2. Create the user and database the project expects, using `psql` or pgAdmin:
+
+```sql
+CREATE USER wms WITH PASSWORD 'wms';
+CREATE DATABASE wms OWNER wms;
+```
+
+On Windows, `psql` is usually not on your PATH. Run it from `C:\Program Files\PostgreSQL\<version>\bin\psql.exe -U postgres`, or use pgAdmin's Query Tool.
+
+3. If your Postgres runs on a different port or uses different credentials, set `DATABASE_URL` accordingly:
+
+```bash
+# macOS/Linux
+export DATABASE_URL=postgres://wms:wms@localhost:5433/wms
+```
+```powershell
+# PowerShell
+$env:DATABASE_URL="postgres://wms:wms@localhost:5433/wms"
+```
+
+### Apply the schema
+
+With either option:
+
+```bash
+npm run migrate
+```
+
+> If you see `password authentication failed for user "wms"`, something else is already listening on port 5432 (often a local Postgres without the `wms` user) or the credentials don't match. Create the user as in Option B, or change the port mapping in `docker-compose.yml` and `DATABASE_URL`.
+
 npm install
 npm run migrate
 npm run dev          # http://localhost:3000/health
@@ -123,3 +170,63 @@ git push
 
 - Protect `main`: require the CI check to pass and block direct pushes.
 - Keep `staging` unprotected enough that the team can push, but require CI to pass on it as a convention.
+
+## Testing
+
+### Unit and e2e tests (no database needed)
+
+```bash
+npm test
+```
+
+Runs the in-memory suite (`tests/e2e/inventory.test.ts`). The Postgres tests below are skipped by default.
+
+### Postgres ledger tests
+
+These run the same inventory logic against a real database and cover things the in-memory ledger can't, such as transfers from an existing balance and concurrent withdrawals never overdrawing stock.
+
+1. Make sure Postgres is running and the schema is applied:
+
+```bash
+npm run migrate
+```
+
+2. Enable the tests and point them at your database.
+
+PowerShell:
+
+```powershell
+$env:LEDGER_DRIVER="postgres"
+$env:DATABASE_URL="postgres://wms:wms@localhost:5432/wms"
+npm test
+```
+
+macOS/Linux:
+
+```bash
+LEDGER_DRIVER=postgres DATABASE_URL=postgres://wms:wms@localhost:5432/wms npm test
+```
+
+Both variables are required. The tests build their own connection pool and don't fall back to a default URL.
+
+Notes:
+
+- Each run uses unique SKUs and leaves its rows behind, so use a dev database, never one with real data.
+- CI skips these tests unless a Postgres service container is added, `npm run migrate` is run, and both variables are set.
+
+### Manual API check
+
+With the API running (`npm run dev`):
+
+```powershell
+$body = @{ sku="SKU-1"; locationId="A-01"; delta=10; reason="initial count" } | ConvertTo-Json
+Invoke-RestMethod -Method Post http://localhost:3000/inventory/adjustments -ContentType "application/json" -Body $body
+
+$t = @{ sku="SKU-1"; from="A-01"; to="B-02"; quantity=4 } | ConvertTo-Json
+Invoke-RestMethod -Method Post http://localhost:3000/inventory/transfers -ContentType "application/json" -Body $t
+
+Invoke-RestMethod http://localhost:3000/inventory/SKU-1/locations/A-01/balance   # expect 6
+Invoke-RestMethod http://localhost:3000/inventory/SKU-1/locations/B-02/balance   # expect 4
+```
+
+An overdraw (for example `delta=-100`) should return `422` with an insufficient-stock error.
