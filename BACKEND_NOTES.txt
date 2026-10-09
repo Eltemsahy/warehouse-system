@@ -1,0 +1,75 @@
+WMS BACKEND NOTES
+=================
+Source of truth: the project plans (PRD, TRD, App Flow, Design Brief, Background
+Schema, Implementation Plan). This file tracks how the backend is being built
+against them. If something here disagrees with a plan, fix one of them.
+
+1. ARCHITECTURE (TRD s1, ADR 0001)
+----------------------------------
+- Modular monolith: one deployable, one database, one Postgres schema per module.
+- Module layers: api -> application -> domain <- infrastructure.
+- Modules talk only through modules/<name>/index.ts or domain events.
+- Only apps/api/src/app.ts wires modules together (composition root).
+- No foreign keys across schemas. Cross-module references are ids validated
+  through public interfaces.
+- `npm run lint:deps` must pass on every merge.
+- Every new module copies the shape of modules/inventory.
+
+2. DECISIONS MADE
+-----------------
+- Single organisation, no multi-tenancy (no tenant_id). Users manage their own
+  warehouse(s). Warehouse scoping still applies (warehouse_id on operational tables).
+- Quantities are integers in the item's base UoM. Revisit only if needed.
+- Inventory keeps text sku / location_id (business codes), per Schema doc s1.
+  (Default from the Schema doc; confirm in the P1-7 ADR.)
+- ERP / carrier / e-commerce vendors: not decided. Ports stay owned by the
+  consuming module.
+
+3. CONVENTIONS
+--------------
+- Business failures return Result<T, Error>; routes map them to 422.
+- Request bodies validated with zod (400 with error.flatten()).
+- Ids are UUIDs from newId(); timestamps are timestamptz (UTC).
+- Migrations: one numbered SQL file per change, applied once, recorded in
+  platform.schema_migrations with a checksum. Never edit an applied file; add a
+  new one.
+- Imports use .js extensions (NodeNext). Prettier: double quotes, semicolons,
+  trailing commas, width 100.
+
+4. STATUS AGAINST THE IMPLEMENTATION PLAN
+-----------------------------------------
+Phase 0 (foundation hardening)
+  P0-1  Ledger status ........ DONE: PgStockLedger exists (Postgres + tests).
+  P0-2  Migration runner ..... DONE (db/migrate.ts, schema_migrations, checksums).
+  P0-3  Postgres ledger ...... DONE: UPDATE-first upsert, key-ordered locks.
+  P0-4  Contract tests ....... TODO: move shared StockLedger suite to
+                               tests/contract, run against both adapters.
+  P0-5  Transactional outbox . TODO: write events to platform.outbox inside the
+                               ledger transaction; relay with SKIP LOCKED,
+                               retry, dead-letter.
+  P0-6  transferId + type CHECK  DONE once the two edits below are applied:
+                               migration 002 (CHECK) + transferId in
+                               inventory.StockTransferred payload.
+  P0-7  Idempotency-Key ...... TODO: shared middleware + platform.idempotency_key.
+  P0-8  Ledger integrity job . TODO.
+  P0-9  Image runs migrations; readiness endpoint; graceful shutdown ... TODO.
+  P0-10 CI: lint, prettier, Postgres service ... TODO.
+  P0-11 Workspace layout for apps/web-admin ... TODO (decide).
+
+Known gaps to close (TRD s11): G1 (check-then-write is guarded by the DB CHECK
+only), G2/G3 (events outside the transaction), G6 (migrations in prod image),
+G8 (no auth), G10 (workspaces).
+
+5. NEXT UP
+----------
+Order: P0-4 -> P0-5 -> P0-7 -> P0-9/P0-10 -> P0-8, then Phase 1 (P1-7 ADR first,
+then identity, locations, catalog).
+Before first production data: decide ledger partitioning (X-4). The primary key
+becomes (id, occurred_at); this is hard to change later.
+
+6. LOCAL DEV
+------------
+- Any reachable PostgreSQL with user/db wms works; Docker is optional.
+- Set DATABASE_URL in .env (see .env.example). Postgres tests need
+  LEDGER_DRIVER=postgres.
+- `npm run migrate` is safe to re-run: applied files print "skipping".

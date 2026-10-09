@@ -27,7 +27,7 @@ export class TransferStock {
       if (e instanceof InsufficientStockError) return err(e);
       throw e;
     }
-    await this.bus.publish([stockTransferred(i)]);
+    await this.bus.publish([stockTransferred({ ...i, transferId })]);
     return ok({ transferId });
   }
 }

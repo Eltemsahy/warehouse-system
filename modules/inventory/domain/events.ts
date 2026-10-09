@@ -6,7 +6,7 @@ export const stockAdjusted = (m: StockMovement): DomainEvent<StockMovement> => (
 });
 
 export const stockTransferred = (
-  p: { sku: string; from: string; to: string; quantity: number },
+  p: { sku: string; from: string; to: string; quantity: number; transferId: string },
 ): DomainEvent<typeof p> => ({
   id: newId(), name: "inventory.StockTransferred", occurredAt: new Date(), payload: p,
 });
