@@ -42,14 +42,14 @@ Phase 0 (foundation hardening)
   P0-1  Ledger status ........ DONE: PgStockLedger exists (Postgres + tests).
   P0-2  Migration runner ..... DONE (db/migrate.ts, schema_migrations, checksums).
   P0-3  Postgres ledger ...... DONE: UPDATE-first upsert, key-ordered locks.
-  P0-4  Contract tests ....... TODO: move shared StockLedger suite to
-                               tests/contract, run against both adapters.
+  P0-4  Contract tests ....... DONE: tests/contract runs one StockLedger suite
+                               against InMemoryLedger and PgStockLedger; CI has
+                               a Postgres service and runs migrations first.
   P0-5  Transactional outbox . TODO: write events to platform.outbox inside the
                                ledger transaction; relay with SKIP LOCKED,
                                retry, dead-letter.
-  P0-6  transferId + type CHECK  DONE once the two edits below are applied:
-                               migration 002 (CHECK) + transferId in
-                               inventory.StockTransferred payload.(DONE)
+  P0-6  transferId + type CHECK  DONE: migration 002 (CHECK) + transferId in
+                               the inventory.StockTransferred payload.
   P0-7  Idempotency-Key ...... TODO: shared middleware + platform.idempotency_key.
   P0-8  Ledger integrity job . TODO.
   P0-9  Image runs migrations; readiness endpoint; graceful shutdown ... TODO.
@@ -62,7 +62,7 @@ G8 (no auth), G10 (workspaces).
 
 5. NEXT UP
 ----------
-Order: P0-4 -> P0-5 -> P0-7 -> P0-9/P0-10 -> P0-8, then Phase 1 (P1-7 ADR first,
+Order: P0-5 -> P0-7 -> P0-9/P0-10 -> P0-8, then Phase 1 (P1-7 ADR first,
 then identity, locations, catalog).
 Before first production data: decide ledger partitioning (X-4). The primary key
 becomes (id, occurred_at); this is hard to change later.

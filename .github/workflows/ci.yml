@@ -3,11 +3,29 @@ on: [push, pull_request]
 jobs:
   test:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: wms
+          POSTGRES_PASSWORD: wms
+          POSTGRES_DB: wms
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U wms -d wms"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://wms:wms@localhost:5432/wms
+      LEDGER_DRIVER: postgres
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with: { node-version: 22, cache: npm }
+        with: { node-version: 20, cache: npm }
       - run: npm ci
       - run: npm run typecheck
       - run: npm run lint:deps
+      - run: npm run migrate
       - run: npm test
+      

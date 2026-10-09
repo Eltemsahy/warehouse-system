@@ -1,15 +1,28 @@
 import type { StockLedger } from "../application/ports.js";
+import { InsufficientStockError } from "../domain/errors.js";
 import type { StockMovement } from "../domain/stock-movement.js";
 
-/** For tests and local dev. Replace with a Postgres ledger (see db/migrations/001_inventory.sql). */
-export class InMemoryLedger implements StockLedger {
-  private movements: StockMovement[] = [];
+const key = (sku: string, locationId: string) => `${sku}\u0000${locationId}`;
 
-  async append(movements: StockMovement[]) { this.movements.push(...movements); }
+/** For tests and local dev. Honours the same contract as PgStockLedger. */
+export class InMemoryLedger implements StockLedger {
+  private levels = new Map<string, number>();
+
+  async append(movements: StockMovement[]) {
+    // Validate the whole batch against a working copy, then commit it. There is no await
+    // between the check and the write, so this is atomic in a single-threaded process,
+    // mirroring the Postgres transaction.
+    const next = new Map<string, number>();
+    for (const m of movements) {
+      const k = key(m.sku, m.locationId);
+      const updated = (next.get(k) ?? this.levels.get(k) ?? 0) + m.quantityDelta;
+      if (updated < 0) throw new InsufficientStockError();
+      next.set(k, updated);
+    }
+    for (const [k, quantity] of next) this.levels.set(k, quantity);
+  }
 
   async balance(sku: string, locationId: string) {
-    return this.movements
-      .filter((m) => m.sku === sku && m.locationId === locationId)
-      .reduce((sum, m) => sum + m.quantityDelta, 0);
+    return this.levels.get(key(sku, locationId)) ?? 0;
   }
 }
