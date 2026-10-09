@@ -49,7 +49,7 @@ Phase 0 (foundation hardening)
                                retry, dead-letter.
   P0-6  transferId + type CHECK  DONE once the two edits below are applied:
                                migration 002 (CHECK) + transferId in
-                               inventory.StockTransferred payload.
+                               inventory.StockTransferred payload.(DONE)
   P0-7  Idempotency-Key ...... TODO: shared middleware + platform.idempotency_key.
   P0-8  Ledger integrity job . TODO.
   P0-9  Image runs migrations; readiness endpoint; graceful shutdown ... TODO.
