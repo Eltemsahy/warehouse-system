@@ -45,9 +45,9 @@ Phase 0 (foundation hardening)
   P0-4  Contract tests ....... DONE: tests/contract runs one StockLedger suite
                                against InMemoryLedger and PgStockLedger; CI has
                                a Postgres service and runs migrations first.
-  P0-5  Transactional outbox . TODO: write events to platform.outbox inside the
-                               ledger transaction; relay with SKIP LOCKED,
-                               retry, dead-letter.
+  P0-5  Transactional outbox . DONE once `npm test` is green (see section 7):
+                               ledger stores events in the same transaction,
+                               relay with SKIP LOCKED, retry, dead-letter.
   P0-6  transferId + type CHECK  DONE: migration 002 (CHECK) + transferId in
                                the inventory.StockTransferred payload.
   P0-7  Idempotency-Key ...... TODO: shared middleware + platform.idempotency_key.
@@ -57,12 +57,12 @@ Phase 0 (foundation hardening)
   P0-11 Workspace layout for apps/web-admin ... TODO (decide).
 
 Known gaps to close (TRD s11): G1 (check-then-write is guarded by the DB CHECK
-only), G2/G3 (events outside the transaction), G6 (migrations in prod image),
+only), G6 (migrations in prod image),
 G8 (no auth), G10 (workspaces).
 
 5. NEXT UP
 ----------
-Order: P0-5 -> P0-7 -> P0-9/P0-10 -> P0-8, then Phase 1 (P1-7 ADR first,
+Order: P0-7 -> P0-9/P0-10 -> P0-8, then Phase 1 (P1-7 ADR first,
 then identity, locations, catalog).
 Before first production data: decide ledger partitioning (X-4). The primary key
 becomes (id, occurred_at); this is hard to change later.
@@ -73,3 +73,27 @@ becomes (id, occurred_at); this is hard to change later.
 - Set DATABASE_URL in .env (see .env.example). Postgres tests need
   LEDGER_DRIVER=postgres.
 - `npm run migrate` is safe to re-run: applied files print "skipping".
+
+7. OUTBOX (P0-5, TRD G2/G3)
+---------------------------
+- StockLedger.append(movements, events?) stores the events in platform.outbox inside
+  the SAME transaction as the movements. Use cases no longer publish to the bus.
+- OutboxRelay (shared/events) polls an OutboxDispatcher and hands committed events to the
+  bus. Delivery is at-least-once; consumers must be idempotent. Order is not guaranteed
+  once retries happen.
+- PgOutbox claims rows with FOR UPDATE SKIP LOCKED in a transaction that stays open while
+  the batch is delivered. A crash mid-batch rolls back, so every row stays pending.
+- Failed delivery: attempts + 1, retry after exponential backoff (1s, 2s, 4s ... capped at
+  5 min). After 8 failures the event moves to platform.outbox_dead_letter.
+- Event payloads travel as JSON: Dates arrive as ISO strings.
+- Deviations from the plans (update the docs when convenient):
+  * TRD s5.4 describes pending()/markPublished(). Replaced by dispatch(), because
+    SKIP LOCKED needs the claim and the delivery to share one transaction.
+  * Schema doc lists outbox_dead_letter as (outbox_id, attempts, last_error, failed_at).
+    name, payload and occurred_at were added because the outbox row is deleted when an
+    event is dead-lettered. platform.outbox gained attempts, next_attempt_at, last_error.
+- TODO: retention job (delete published rows older than 30 days, Schema doc s14);
+  dead-letter replay tool; alert on dead-letter count and outbox lag (P0-9).
+- The relay holds one pool connection while a batch is delivered; keep batchSize small and
+  handlers fast, or give the relay its own pool.
+- Run only one relay per process. Several processes are safe (SKIP LOCKED).

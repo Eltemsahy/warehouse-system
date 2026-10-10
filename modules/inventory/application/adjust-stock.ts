@@ -1,5 +1,4 @@
 import { err, ok, type Result } from "../../../shared/kernel/index.js";
-import type { InMemoryEventBus } from "../../../shared/events/index.js";
 import { InsufficientStockError } from "../domain/errors.js";
 import { createMovement, type StockMovement } from "../domain/stock-movement.js";
 import { stockAdjusted } from "../domain/events.js";
@@ -8,7 +7,7 @@ import type { StockLedger } from "./ports.js";
 export interface AdjustStockInput { sku: string; locationId: string; delta: number; reason: string }
 
 export class AdjustStock {
-  constructor(private ledger: StockLedger, private bus: InMemoryEventBus) {}
+  constructor(private ledger: StockLedger) {}
 
   async execute(i: AdjustStockInput): Promise<Result<StockMovement>> {
     if (i.delta === 0) return err(new Error("delta must be non-zero"));
@@ -20,12 +19,12 @@ export class AdjustStock {
       type: "ADJUSTMENT", reason: i.reason,
     });
     try {
-      await this.ledger.append([movement]);
+      // The event is stored in the same transaction as the movement (outbox).
+      await this.ledger.append([movement], [stockAdjusted(movement)]);
     } catch (e) {
       if (e instanceof InsufficientStockError) return err(e);
       throw e;
     }
-    await this.bus.publish([stockAdjusted(movement)]);
     return ok(movement);
   }
 }

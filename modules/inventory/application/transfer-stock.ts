@@ -1,5 +1,4 @@
 import { err, newId, ok, type Result } from "../../../shared/kernel/index.js";
-import type { InMemoryEventBus } from "../../../shared/events/index.js";
 import { InsufficientStockError } from "../domain/errors.js";
 import { createMovement } from "../domain/stock-movement.js";
 import { stockTransferred } from "../domain/events.js";
@@ -8,7 +7,7 @@ import type { StockLedger } from "./ports.js";
 export interface TransferStockInput { sku: string; from: string; to: string; quantity: number }
 
 export class TransferStock {
-  constructor(private ledger: StockLedger, private bus: InMemoryEventBus) {}
+  constructor(private ledger: StockLedger) {}
 
   async execute(i: TransferStockInput): Promise<Result<{ transferId: string }>> {
     if (i.quantity <= 0) return err(new Error("quantity must be positive"));
@@ -17,17 +16,19 @@ export class TransferStock {
       return err(new Error("insufficient stock at source location"));
     }
     const transferId = newId();
-    // Both legs are appended in ONE atomic call.
+    // Both legs and the event are stored in ONE atomic call (outbox).
     try {
-      await this.ledger.append([
-        createMovement({ sku: i.sku, locationId: i.from, quantityDelta: -i.quantity, type: "TRANSFER_OUT", referenceId: transferId }),
-        createMovement({ sku: i.sku, locationId: i.to, quantityDelta: i.quantity, type: "TRANSFER_IN", referenceId: transferId }),
-      ]);
+      await this.ledger.append(
+        [
+          createMovement({ sku: i.sku, locationId: i.from, quantityDelta: -i.quantity, type: "TRANSFER_OUT", referenceId: transferId }),
+          createMovement({ sku: i.sku, locationId: i.to, quantityDelta: i.quantity, type: "TRANSFER_IN", referenceId: transferId }),
+        ],
+        [stockTransferred({ ...i, transferId })],
+      );
     } catch (e) {
       if (e instanceof InsufficientStockError) return err(e);
       throw e;
     }
-    await this.bus.publish([stockTransferred({ ...i, transferId })]);
     return ok({ transferId });
   }
 }

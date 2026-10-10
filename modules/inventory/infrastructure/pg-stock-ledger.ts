@@ -1,4 +1,6 @@
 import type { Pool } from "pg";
+import { insertOutboxEvents } from "../../../shared/events/index.js";
+import type { DomainEvent } from "../../../shared/kernel/index.js";
 import type { StockLedger } from "../application/ports.js";
 import type { StockMovement } from "../domain/stock-movement.js";
 import { InsufficientStockError } from "../domain/errors.js";
@@ -8,8 +10,8 @@ const CHECK_VIOLATION = "23514";
 export class PgStockLedger implements StockLedger {
   constructor(private pool: Pool) {}
 
-  async append(movements: StockMovement[]): Promise<void> {
-    if (movements.length === 0) return;
+  async append(movements: StockMovement[], events: readonly DomainEvent[] = []): Promise<void> {
+    if (movements.length === 0 && events.length === 0) return;
 
     // Fixed lock order (sku, location) so concurrent transfers can't deadlock.
     const ordered = [...movements].sort(
@@ -19,6 +21,7 @@ export class PgStockLedger implements StockLedger {
     const client = await this.pool.connect();
     try {
       await client.query("BEGIN");
+      await insertOutboxEvents(client, events);
       for (const m of ordered) {
         await client.query(
           `INSERT INTO inventory.stock_movements
