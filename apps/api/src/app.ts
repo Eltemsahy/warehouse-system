@@ -5,6 +5,11 @@ import {
   OutboxRelay,
   PgOutbox,
 } from "../../../shared/events/index.js";
+import {
+  idempotency,
+  InMemoryIdempotencyStore,
+  PgIdempotencyStore,
+} from "../../../shared/http/index.js";
 import { logger } from "../../../shared/observability/index.js";
 import {
   createInventoryModule,
@@ -14,13 +19,21 @@ import {
 import { config } from "./config.js";
 import { pool } from "./db.js";
 
-/** The ledger and the outbox it writes to must be backed by the same store. */
+/** The ledger, the outbox it writes to, and the idempotency records share one store. */
 function createPersistence() {
   if (config.LEDGER_DRIVER === "postgres") {
-    return { ledger: new PgStockLedger(pool), dispatcher: new PgOutbox(pool) };
+    return {
+      ledger: new PgStockLedger(pool),
+      dispatcher: new PgOutbox(pool),
+      idempotencyStore: new PgIdempotencyStore(pool),
+    };
   }
   const outbox = new InMemoryOutbox();
-  return { ledger: new InMemoryLedger(outbox), dispatcher: outbox };
+  return {
+    ledger: new InMemoryLedger(outbox),
+    dispatcher: outbox,
+    idempotencyStore: new InMemoryIdempotencyStore(),
+  };
 }
 
 /** Composition root: the only place modules are wired together. */
@@ -31,7 +44,12 @@ export function buildApp() {
   const bus = new InMemoryEventBus();
   bus.subscribe("inventory.StockAdjusted", (e) => logger.info("event", { name: e.name }));
 
-  const { ledger, dispatcher } = createPersistence();
+  const { ledger, dispatcher, idempotencyStore } = createPersistence();
+
+  // Replaying a request with the same Idempotency-Key returns the original response
+  // and never runs a second write (TRD s5.5). Must come after express.json().
+  app.use(idempotency(idempotencyStore));
+
   const inventory = createInventoryModule({ ledger });
   app.use("/inventory", inventory.router);
 

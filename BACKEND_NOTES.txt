@@ -50,7 +50,8 @@ Phase 0 (foundation hardening)
                                relay with SKIP LOCKED, retry, dead-letter.
   P0-6  transferId + type CHECK  DONE: migration 002 (CHECK) + transferId in
                                the inventory.StockTransferred payload.
-  P0-7  Idempotency-Key ...... TODO: shared middleware + platform.idempotency_key.
+  P0-7  Idempotency-Key ...... DONE once `npm test` is green (see section 8):
+                               shared/http middleware + platform.idempotency_key.
   P0-8  Ledger integrity job . TODO.
   P0-9  Image runs migrations; readiness endpoint; graceful shutdown ... TODO.
   P0-10 CI: lint, prettier, Postgres service ... TODO.
@@ -58,11 +59,12 @@ Phase 0 (foundation hardening)
 
 Known gaps to close (TRD s11): G1 (check-then-write is guarded by the DB CHECK
 only), G6 (migrations in prod image),
+G12 NEW, not in the TRD: see section 8,
 G8 (no auth), G10 (workspaces).
 
 5. NEXT UP
 ----------
-Order: P0-7 -> P0-9/P0-10 -> P0-8, then Phase 1 (P1-7 ADR first,
+Order: Express 5 upgrade (G12) -> P0-9/P0-10 -> P0-8, then Phase 1 (P1-7 ADR first,
 then identity, locations, catalog).
 Before first production data: decide ledger partitioning (X-4). The primary key
 becomes (id, occurred_at); this is hard to change later.
@@ -97,3 +99,37 @@ becomes (id, occurred_at); this is hard to change later.
 - The relay holds one pool connection while a batch is delivered; keep batchSize small and
   handlers fast, or give the relay its own pool.
 - Run only one relay per process. Several processes are safe (SKIP LOCKED).
+
+8. IDEMPOTENCY (P0-7, TRD s5.5)
+-------------------------------
+- Middleware: shared/http/idempotency.ts, mounted app-wide in app.ts after express.json().
+  Applies to POST/PUT/PATCH/DELETE that carry an Idempotency-Key header (1-255 printable
+  ASCII chars). GET is ignored. The key is optional for now; `required: true` makes it
+  mandatory (planned for the mobile scanner, per the TRD API conventions).
+- Per key and caller (user_id is 'anonymous' until the identity module exists):
+  * first request: claimed, runs, response stored BEFORE it is sent to the client
+  * same key + same request: stored status + JSON body replayed, header
+    Idempotent-Replayed: true, nothing runs
+  * same key, first request still running: 409 (Retry-After: 1)
+  * same key, different request (method, url or body differ): 422
+- "Same request" = sha256(method + url + body with sorted keys).
+- 2xx and 4xx are kept (a 422 replays as the same 422). 5xx is NOT kept: the claim is
+  released so the client can retry. Records live 24 h.
+- If the idempotency store itself fails, the request fails (500) and nothing runs.
+- JSON APIs only: a replay is the stored status plus JSON body.
+- Known limits:
+  * The record is written after the business transaction commits, not inside it. If the
+    process dies exactly between the two, the key stays "in progress" and retries get 409
+    until it expires (24 h) instead of risking a duplicate movement. To unstick one after
+    checking the ledger by hand:
+      DELETE FROM platform.idempotency_key WHERE key = '<key>' AND response_status IS NULL;
+    A 500 after an ambiguous COMMIT (connection lost) can still allow one duplicate.
+    Full exactly-once needs the idempotency row written inside the ledger transaction
+    (unit of work); revisit before the scanner goes live (P3-4).
+  * G12 (NEW, not in the TRD gap list): Express 4 does not catch errors thrown in async
+    route handlers. A database error inside a route becomes an unhandled rejection and
+    terminates the process (Node 15+), which also strands that request's key as in-progress.
+    Fix: upgrade to Express 5 (`npm i express@5 @types/express@5`), which turns rejections
+    into 500s, so the middleware releases the key. Do this before P0-9.
+- TODO: schedule store.purgeExpired() (delete expired rows) once background jobs exist;
+  scope keys by the real user id when identity lands.
