@@ -1,151 +1,219 @@
-Initial directory structure tree with each file's role.
+Directory structure tree with each file's role (1.1).
 
 warehouse-system/
 ├── .github/
 │   └── workflows/
-│       └── ci.yml                      # CI: install, typecheck, lint:deps, test on every push/PR
-├── .dependency-cruiser.cjs             # Architecture rules: no cross-module internals, pure domain, layer direction
-├── .env.example                        # Template for env vars (PORT, DATABASE_URL, LOG_LEVEL)
-├── .gitignore                          # Ignores node_modules, dist, .env, coverage
+│       └── ci.yml                      # CI workflow: install, typecheck, lint:deps, and test on push/PR
+├── .dependency-cruiser.cjs             # Architecture rules: no cross-module internals, pure-domain boundaries, and layer direction
+├── .env                                # Local runtime environment values for the API (not committed)
+├── .env.example                        # Template for env vars such as PORT, DATABASE_URL, and LOG_LEVEL
+├── .gitignore                          # Ignores node_modules, build output, env files, coverage, and editor state
 ├── .prettierrc                         # Prettier formatting rules for the backend
-├── README.md                           # Project overview, quick start, curl examples, status
-├── docker-compose.yml                  # Local Postgres 16 container
-├── eslint.config.js                    # Backend ESLint config (ignores apps/web-admin)
-├── package.json                        # Root deps and scripts (dev, build, test, lint, lint:deps, migrate)
+├── BACKEND_NOTES.txt                   # Backend architecture notes and operational constraints
+├── README.md                           # Project overview, setup steps, and usage examples
+├── backend-structure.txt               # Backend layout summary and module map
+├── docker-compose.yml                  # Local Postgres and supporting services configuration
+├── eslint.config.js                    # Root ESLint config for backend source
 ├── package-lock.json                   # Root dependency lockfile
-├── tsconfig.json                       # Backend TypeScript config (strict, NodeNext)
-├── vitest.config.ts                    # Test runner config (tests/ and modules/**/*.test.ts)
+├── package.json                        # Root scripts and workspace dependencies
+├── tsconfig.json                       # Shared TypeScript config for the backend workspace
+├── vitest.config.ts                    # Vitest configuration for test discovery and runs
 │
 ├── apps/
 │   ├── api/
 │   │   └── src/
-│   │       ├── main.ts                 # Process entrypoint: builds the app and listens on PORT
-│   │       ├── app.ts                  # Composition root: creates the event bus, wires modules, mounts routes
-│   │       └── config.ts               # Validates env vars with zod and exports typed config
+│   │       ├── app.ts                  # Composition root: wires modules and mounts API routes
+│   │       ├── config.ts               # Validates runtime environment values with zod
+│   │       ├── db.ts                   # Database bootstrap and connection setup
+│   │       └── main.ts                 # Process entrypoint: builds the app and starts the server
 │   │
-│   └── web-admin/                      # React + Vite back-office UI (own package.json and toolchain)
-│       ├── .gitignore                  # Vite template ignores (logs, dist, editor files)
-│       ├── README.md                   # Vite template readme
-│       ├── eslint.config.js            # Frontend ESLint config (react-hooks, react-refresh)
-│       ├── index.html                  # HTML shell that loads src/main.tsx
-│       ├── package.json                # Frontend deps and scripts (dev, build, lint, preview); Tailwind CSS 4
+│   ├── mobile-scanner/
+│   │   └── README.md                  # Scanner app overview, workflow notes, and setup
+│   │
+│   └── web-admin/                      # React + Vite back-office UI
+│       ├── .gitignore                  # Vite template ignores for logs, build output, and editor files
+│       ├── README.md                   # Vite app readme with dev/build guidance
+│       ├── eslint.config.js            # Frontend ESLint config with React hooks and refresh rules
+│       ├── index.html                  # HTML shell for the Vite app
 │       ├── package-lock.json           # Frontend dependency lockfile
-│       ├── tsconfig.json               # Project references to the app and node configs
-│       ├── tsconfig.app.json           # TypeScript settings for src/ (bundler mode)
-│       ├── tsconfig.node.json          # TypeScript settings for vite.config.ts
-│       ├── vite.config.ts              # Vite config with React and Tailwind CSS plugins
+│       ├── package.json                # Frontend scripts and dependencies (Vite + React + Tailwind)
 │       ├── public/
 │       │   ├── favicon.svg             # Browser tab icon
-│       │   └── icons.svg               # SVG sprite retained from the Vite template
-│       └── src/
-│           ├── main.tsx                # React entrypoint: imports global Tailwind styles and mounts <App />
-│           ├── App.tsx                 # App composition: wraps the landing page in the shared app layout
-│           ├── index.css               # Tailwind CSS import, theme tokens, and small global accessibility styles
-│           ├── components/
-│           │   ├── layout/
-│           │   │   ├── AppLayout.tsx    # Shared page shell: site header, page content, and footer
-│           │   │   ├── SiteHeader.tsx   # Brand, primary navigation, and platform call to action
-│           │   │   └── SiteFooter.tsx   # Brand and project footer links
-│           │   └── ui/
-│           │       ├── ArrowIcon.tsx    # Reusable directional and diagonal arrow icon
-│           │       └── BrandMark.tsx    # Reusable Cargo logo mark
-│           ├── pages/
-│           │   └── LandingPage.tsx      # Landing page composition
-│           ├── features/
-│               └── landing/
-│                   ├── components/
-│                   │   ├── HeroSection.tsx         # Landing hero and warehouse preview placement
-│                   │   ├── DashboardPreview.tsx    # Illustrative, sample-data warehouse dashboard
-│                   │   └── WorkflowSection.tsx    # Receiving, inventory, and fulfillment overview
-│                   └── data/
-│                       └── previewData.ts          # Sample dashboard metrics, movements, locations, and steps
-│           └── assets/
-│               ├── hero.png            # Unused asset retained from the Vite starter template
-│               ├── react.svg           # Unused React logo retained from the Vite starter template
-│               └── vite.svg            # Unused Vite logo retained from the Vite starter template
-│
-├── modules/
-│   ├── inventory/                      # The only implemented module
-│   │   ├── index.ts                    # Public interface: createInventoryModule() and the StockLedger type
-│   │   ├── api/
-│   │   │   └── routes.ts               # Express routes: adjustments, transfers, balance (zod-validated)
-│   │   ├── application/
-│   │   │   ├── ports.ts                # StockLedger interface the infrastructure must implement
-│   │   │   ├── adjust-stock.ts         # Use case: add/remove stock, rejects negative balances
-│   │   │   └── transfer-stock.ts       # Use case: move stock between locations (two legs, one atomic append)
-│   │   ├── domain/
-│   │   │   ├── stock-movement.ts       # Immutable ledger line and its factory with validation
-│   │   │   └── events.ts               # Domain events: StockAdjusted, StockTransferred
-│   │   └── infrastructure/
-│   │       └── in-memory-ledger.ts     # Dev/test ledger; to be replaced by a Postgres implementation
-│   │
-│   ├── catalog/                        # Scaffold (SKUs, units, batches/serials)
-│   │   ├── index.ts                    # Public interface stub (exports MODULE_NAME)
-│   │   ├── README.md                   # Layer rules and owned schema name
-│   │   ├── api/.gitkeep                # Keeps the empty folder in git
-│   │   ├── application/.gitkeep        # Same
-│   │   ├── domain/.gitkeep             # Same
-│   │   └── infrastructure/.gitkeep     # Same
-│   │
-│   ├── identity/                       # Scaffold (users, roles, permissions)
-│   │   ├── index.ts / README.md        # Same roles as in catalog
-│   │   └── api|application|domain|infrastructure/.gitkeep
-│   │
-│   ├── inbound/                        # Scaffold (purchase orders, receiving, putaway)
-│   │   ├── index.ts / README.md
-│   │   └── api|application|domain|infrastructure/.gitkeep
-│   │
-│   ├── locations/                      # Scaffold (warehouses, zones, bins)
-│   │   ├── index.ts / README.md
-│   │   └── api|application|domain|infrastructure/.gitkeep
-│   │
-│   ├── outbound/                       # Scaffold (orders, allocation, picking, packing)
-│   │   ├── index.ts / README.md
-│   │   └── api|application|domain|infrastructure/.gitkeep
-│   │
-│   └── shipping/                       # Scaffold (carriers, labels, tracking)
-│       ├── index.ts / README.md
-│       └── api|application|domain|infrastructure/.gitkeep
-│
-├── shared/
-│   ├── kernel/
-│   │   ├── index.ts                    # Barrel export for the kernel
-│   │   ├── result.ts                   # Result<T, E> type with ok()/err() helpers
-│   │   ├── ids.ts                      # newId() using crypto.randomUUID
-│   │   └── domain-event.ts             # DomainEvent interface (id, name, occurredAt, payload)
-│   ├── events/
-│   │   ├── index.ts                    # Barrel export
-│   │   ├── event-bus.ts                # In-process pub/sub, swappable for a broker later
-│   │   └── outbox.ts                   # OutboxStore interface plus in-memory version for reliable publishing
-│   └── observability/
-│       ├── index.ts                    # Barrel export
-│       └── logger.ts                   # JSON logger with levels driven by LOG_LEVEL
-│
-├── integrations/                       # Vendor adapters; each is currently an empty stub
-│   ├── carriers/index.ts               # Future carrier adapters (DHL, FedEx, ...)
-│   ├── erp/index.ts                    # Future ERP adapter
-│   └── edi/index.ts                    # Future EDI adapter
+│       │   └── icons.svg               # SVG sprite retained from the starter template
+│       ├── src/
+│       │   ├── App.tsx                 # App composition: layout and landing page wrapper
+│       │   ├── index.css               # Tailwind import, token definitions, and small global styles
+│       │   ├── main.tsx                # React entrypoint that mounts the app
+│       │   ├── assets/
+│       │   │   ├── hero.png            # Landing hero image asset
+│       │   │   ├── react.svg           # Unused React logo retained from the template
+│       │   │   └── vite.svg            # Unused Vite logo retained from the template
+│       │   ├── components/
+│       │   │   ├── layout/
+│       │   │   │   ├── AppLayout.tsx    # Shared page shell with header, main content, and footer
+│       │   │   │   ├── SiteHeader.tsx   # Brand, navigation, and platform CTA
+│       │   │   │   └── SiteFooter.tsx   # Brand and project footer links
+│       │   │   └── ui/
+│       │   │       ├── ArrowIcon.tsx    # Reusable directional arrow icon
+│       │   │       └── BrandMark.tsx    # Reusable cargo logo mark
+│       │   ├── features/
+│       │   │   └── landing/
+│       │   │       ├── components/
+│       │   │       │   ├── DashboardPreview.tsx    # Sample warehouse dashboard preview
+│       │   │       │   ├── HeroSection.tsx         # Hero section and warehouse-rendered preview
+│       │   │       │   └── WorkflowSection.tsx    # Receiving, inventory, and fulfillment highlights
+│       │   │       └── data/
+│       │   │           └── previewData.ts          # Sample metrics, movements, locations, and steps
+│       │   ├── pages/
+│       │   │   └── LandingPage.tsx      # Landing page composition
+│       │   └── assets/                  # Static UI visuals retained from the starter template
+│       ├── tsconfig.app.json           # TypeScript settings for the app source tree in bundler mode
+│       ├── tsconfig.json               # Project references for the app and node configs
+│       ├── tsconfig.node.json          # TypeScript settings for vite.config.ts
+│       └── vite.config.ts              # Vite config with React and Tailwind integration
 │
 ├── db/
-│   ├── migrate.ts                      # Runs every .sql in migrations/ in filename order
+│   ├── migrate.ts                      # Runs each SQL migration in filename order
 │   ├── migrations/
-│   │   ├── 000_platform.sql            # platform schema and outbox table
-│   │   └── 001_inventory.sql           # inventory schema: stock_movements ledger and stock_levels cache
+│   │   ├── 000_platform.sql            # Platform schema and outbox table
+│   │   ├── 001_inventory.sql           # Inventory schema with stock ledger and cached levels
+│   │   ├── 002_inventory_movement_type_check.sql  # Enforces allowed movement types in inventory ledger
+│   │   ├── 003_outbox_relay.sql        # Outbox relay for event publishing and release
+│   │   └── 004_idempotency_key.sql     # Adds idempotency key support for reliable retries
 │   └── seeds/
-│       └── dev.sql                     # Placeholder for dev seed data
-│
-├── tests/
-│   ├── e2e/
-│   │   └── inventory.test.ts           # Tests adjust, negative-balance rejection, transfer
-│   └── contract/
-│       └── .gitkeep                    # Reserved for module/integration contract tests
+│       └── dev.sql                    # Placeholder for local development seed data
 │
 ├── docs/
 │   ├── adr/
-│   │   ├── 0001-modular-monolith.md    # Decision: one deployable, module boundaries enforced by tooling
-│   │   └── 0002-inventory-ledger.md    # Decision: stock as an append-only movement ledger
+│   │   ├── 0001-modular-monolith.md    # Decision: modular monolith with architecture tooling boundaries
+│   │   └── 0002-inventory-ledger.md    # Decision: append-only movement ledger for stock history
 │   └── domain/
-│       └── glossary.md                 # Definitions: SKU, putaway, allocation, wave, LPN
+│       └── glossary.md                 # Domain glossary for warehouse terms and entities
 │
-└── infra/
-    └── Dockerfile                      # Multi-stage build for the API image
+├── infra/
+│   └── Dockerfile                      # Multi-stage image definition for the API service
+│
+├── integrations/
+│   ├── carriers/
+│   │   └── index.ts                   # Carrier adapter entrypoint for future shipping integrations
+│   ├── edi/
+│   │   └── index.ts                   # EDI adapter entrypoint for future document exchange
+│   └── erp/
+│       └── index.ts                   # ERP adapter entrypoint for future system integration
+│
+├── modules/
+│   ├── catalog/                        # Scaffold for SKUs, units, and batch/serial metadata
+│   │   ├── README.md                   # Module readme describing owned schema and layer rules
+│   │   ├── index.ts                    # Module public interface stub
+│   │   ├── api/
+│   │   │   └── .gitkeep               # Keeps the empty API folder in git
+│   │   ├── application/
+│   │   │   └── .gitkeep               # Keeps the empty app layer folder in git
+│   │   ├── domain/
+│   │   │   └── .gitkeep               # Keeps the empty domain folder in git
+│   │   └── infrastructure/
+│   │       └── .gitkeep               # Keeps the empty infrastructure folder in git
+│   │
+│   ├── identity/                       # Scaffold for users, roles, and permissions
+│   │   ├── README.md                   # Module readme describing owned schema and layer rules
+│   │   ├── index.ts                    # Module public interface stub
+│   │   ├── api/
+│   │   │   └── .gitkeep               # Keeps the empty API folder in git
+│   │   ├── application/
+│   │   │   └── .gitkeep               # Keeps the empty app layer folder in git
+│   │   ├── domain/
+│   │   │   └── .gitkeep               # Keeps the empty domain folder in git
+│   │   └── infrastructure/
+│   │       └── .gitkeep               # Keeps the empty infrastructure folder in git
+│   │
+│   ├── inbound/                        # Scaffold for purchase orders and receiving workflows
+│   │   ├── README.md                   # Module readme describing owned schema and layer rules
+│   │   ├── index.ts                    # Module public interface stub
+│   │   ├── api/
+│   │   │   └── .gitkeep               # Keeps the empty API folder in git
+│   │   ├── application/
+│   │   │   └── .gitkeep               # Keeps the empty app layer folder in git
+│   │   ├── domain/
+│   │   │   └── .gitkeep               # Keeps the empty domain folder in git
+│   │   └── infrastructure/
+│   │       └── .gitkeep               # Keeps the empty infrastructure folder in git
+│   │
+│   ├── inventory/                      # Fully implemented inventory module
+│   │   ├── index.ts                    # Public module interface: createInventoryModule and ledger types
+│   │   ├── api/
+│   │   │   └── routes.ts               # Express routes for adjustments, transfers, and balances
+│   │   ├── application/
+│   │   │   ├── adjust-stock.ts         # Use case: add or remove stock while rejecting negative balances
+│   │   │   ├── ports.ts                # Ledger contract required by application code
+│   │   │   └── transfer-stock.ts       # Use case: move stock between locations atomically
+│   │   ├── domain/
+│   │   │   ├── errors.ts               # Inventory-specific validation and domain errors
+│   │   │   ├── events.ts               # Domain events: StockAdjusted and StockTransferred
+│   │   │   └── stock-movement.ts       # Immutable ledger entry with factory validation
+│   │   └── infrastructure/
+│   │       ├── in-memory-ledger.ts     # In-memory dev/test ledger for local workflows
+│   │       └── pg-stock-ledger.ts      # Postgres-backed ledger implementation for persistence
+│   │
+│   ├── locations/                      # Scaffold for warehouses, zones, and bins
+│   │   ├── README.md                   # Module readme describing owned schema and layer rules
+│   │   ├── index.ts                    # Module public interface stub
+│   │   ├── api/
+│   │   │   └── .gitkeep               # Keeps the empty API folder in git
+│   │   ├── application/
+│   │   │   └── .gitkeep               # Keeps the empty app layer folder in git
+│   │   ├── domain/
+│   │   │   └── .gitkeep               # Keeps the empty domain folder in git
+│   │   └── infrastructure/
+│   │       └── .gitkeep               # Keeps the empty infrastructure folder in git
+│   │
+│   ├── outbound/                       # Scaffold for orders, allocation, and picking workflows
+│   │   ├── README.md                   # Module readme describing owned schema and layer rules
+│   │   ├── index.ts                    # Module public interface stub
+│   │   ├── api/
+│   │   │   └── .gitkeep               # Keeps the empty API folder in git
+│   │   ├── application/
+│   │   │   └── .gitkeep               # Keeps the empty app layer folder in git
+│   │   ├── domain/
+│   │   │   └── .gitkeep               # Keeps the empty domain folder in git
+│   │   └── infrastructure/
+│   │       └── .gitkeep               # Keeps the empty infrastructure folder in git
+│   │
+│   └── shipping/                       # Scaffold for carriers, labels, and tracking
+│       ├── README.md                   # Module readme describing owned schema and layer rules
+│       ├── index.ts                    # Module public interface stub
+│       ├── api/
+│       │   └── .gitkeep               # Keeps the empty API folder in git
+│       ├── application/
+│       │   └── .gitkeep               # Keeps the empty app layer folder in git
+│       ├── domain/
+│       │   └── .gitkeep               # Keeps the empty domain folder in git
+│       └── infrastructure/
+│           └── .gitkeep               # Keeps the empty infrastructure folder in git
+│
+├── shared/
+│   ├── events/
+│   │   ├── event-bus.ts               # In-process pub/sub for domain and integration events
+│   │   ├── index.ts                    # Barrel export for event utilities
+│   │   ├── outbox-relay.ts             # Relay that publishes outbox rows to the event bus
+│   │   ├── outbox.ts                  # Outbox abstractions and in-memory default implementation
+│   │   └── pg-outbox.ts               # Postgres-backed outbox implementation
+│   ├── http/
+│   │   ├── idempotency-store.ts        # Interface for idempotency store persistence
+│   │   ├── idempotency.ts              # Idempotent request helpers for API routes
+│   │   ├── index.ts                    # Barrel export for HTTP utilities
+│   │   └── pg-idempotency-store.ts     # Postgres-backed idempotency storage implementation
+│   ├── kernel/
+│   │   ├── domain-event.ts             # DomainEvent contract shared across modules
+│   │   ├── ids.ts                      # UUID factory helpers for domain identifiers
+│   │   ├── index.ts                    # Barrel export for the kernel layer
+│   │   └── result.ts                   # Result<T, E> helpers for safe error handling
+│   └── observability/
+│       ├── index.ts                    # Barrel export for observability helpers
+│       └── logger.ts                   # JSON logger with levels driven by LOG_LEVEL
+│
+├── tests/
+│   ├── contract/
+│   │   └── .gitkeep                   # Reserved for contract tests and API agreements
+│   └── e2e/
+│       └── inventory.test.ts           # End-to-end checks for adjustments and transfers
+│
