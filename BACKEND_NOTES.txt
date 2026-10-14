@@ -54,18 +54,19 @@ Phase 0 (foundation hardening)
                                shared/http middleware + platform.idempotency_key.
   P0-8  Ledger integrity job . DONE once `npm test` is green (see section 9):
                                nightly check + `npm run check:ledger` + CI step.
-  P0-9  Image runs migrations; readiness endpoint; graceful shutdown ... TODO.
+  P0-9  Image migrates + serves; readiness endpoint; graceful shutdown
+                               DONE once `npm test` is green and the image job in CI
+                               passes (see section 10).
   P0-10 CI: lint, prettier, Postgres service ... TODO.
   P0-11 Workspace layout for apps/web-admin ... TODO (decide).
 
 Known gaps to close (TRD s11): G1 (check-then-write is guarded by the DB CHECK
-only), G6 (migrations in prod image),
-G12 NEW, not in the TRD: see section 8,
+only), G12 NEW, not in the TRD: see section 8 (closed by the Express 5 upgrade + error handler),
 G8 (no auth), G10 (workspaces).
 
 5. NEXT UP
 ----------
-Order: Express 5 upgrade (G12) -> P0-9/P0-10, then Phase 1 (P1-7 ADR first,
+Order: P0-10 (lint, prettier, CI), then Phase 1 (P1-7 ADR first,
 then identity, locations, catalog).
 Before first production data: decide ledger partitioning (X-4). The primary key
 becomes (id, occurred_at); this is hard to change later.
@@ -161,3 +162,45 @@ becomes (id, occurred_at); this is hard to change later.
   compare against stock_snapshot_daily and only re-sum recent partitions. Record each run
   in platform.job_run once the background-job tables exist (Schema doc, platform schema);
   add a metric/alert on the error log line (P0-9).
+
+10. PRODUCTION IMAGE, HEALTH AND SHUTDOWN (P0-9, TRD G6, s9)
+------------------------------------------------------------
+- Build: `npm run build` uses tsconfig.build.json (apps/api, modules, shared, integrations, db;
+  no tests, no web-admin) and then scripts/copy-migrations.mjs, because tsc does not emit
+  the .sql files. Output: dist/apps/api/src/main.js, dist/db/migrate.js,
+  dist/db/migrations/*.sql. Scripts needed in package.json:
+    "build": "tsc -p tsconfig.build.json && node scripts/copy-migrations.mjs"
+    "migrate:prod": "node dist/db/migrate.js"
+- infra/Dockerfile: multi-stage; runtime stage has prod dependencies only, runs as the
+  non-root `node` user, and has a HEALTHCHECK on /health/ready.
+- infra/docker-entrypoint.sh runs `node dist/db/migrate.js` and then `exec`s the app, so a
+  plain `docker run` migrates and serves (the exit criterion). Several containers starting
+  together are safe: the runner holds a Postgres advisory lock. RUN_MIGRATIONS=false skips
+  it, for a separate release step (TRD s9 proposal):
+    docker run --rm -e RUN_MIGRATIONS=false <image> node dist/db/migrate.js
+- .dockerignore keeps local node_modules (Windows binaries), .env and tests out of the image.
+  .gitattributes pins *.sh to LF; the Dockerfile also strips CRs, since a CRLF entrypoint
+  fails with "/bin/sh^M: not found".
+- docker-compose: `docker compose up -d db` is unchanged. The `api` service sits behind the
+  `app` profile: `docker compose --profile app up --build`.
+- Endpoints (both exempt from authentication when it arrives):
+  * GET /health        liveness, touches nothing
+  * GET /health/ready  200 only if `SELECT 1` succeeds within 2 s and we are not shutting
+                       down; otherwise 503. Failure details go to the log, not the response.
+- Graceful shutdown (apps/api/src/lifecycle.ts, wired in main.ts) on SIGTERM or SIGINT:
+  1. /health/ready flips to 503 and replies carry `Connection: close`
+  2. the HTTP server stops accepting and drains in-flight requests
+  3. outbox relay stops, then the jobs, then the database pool closes
+  4. exit 0 when clean; exit 1 if a step failed or 8 s passed (Docker kills at 10 s)
+  A second Ctrl+C kills the process immediately. Windows has no SIGTERM; Ctrl+C (SIGINT) works.
+- Errors (Express 5): a JSON 404 handler and a JSON error handler are last in the chain.
+  5xx -> {"error":"internal server error"} and a log line with the stack; 4xx keeps its message.
+  This also closes G12: a crashing route no longer kills the process, and its Idempotency-Key
+  is released.
+- CI: the `image` job builds the image, runs it against a Postgres service, waits for
+  /health/ready, checks the log shows the migrations ran, then `docker stop` must exit 0.
+- Not verified here (no Docker in the authoring sandbox): the Dockerfile itself and the
+  `image` CI job. The build output layout and the logic were checked; run the image once.
+- TODO / noted: root package.json lists react and react-dom as runtime dependencies, which
+  the API never uses (they belong to apps/web-admin) - clean up with P0-11 (workspaces).
+  No metrics yet (TRD s7): add outbox lag and readiness failures when metrics land.

@@ -7,5 +7,26 @@ services:
       POSTGRES_DB: wms
     ports: ["5432:5432"]
     volumes: ["pgdata:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U wms -d wms"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # The production image: migrates, then serves. Not started by `docker compose up -d db`.
+  #   docker compose --profile app up --build
+  api:
+    profiles: ["app"]
+    build:
+      context: .
+      dockerfile: infra/Dockerfile
+    environment:
+      DATABASE_URL: postgres://wms:wms@db:5432/wms
+      LEDGER_DRIVER: postgres
+    ports: ["3000:3000"]
+    depends_on:
+      db:
+        condition: service_healthy
+
 volumes:
   pgdata:

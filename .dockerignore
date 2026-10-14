@@ -1,0 +1,14 @@
+# Never ship local installs (Windows binaries!), secrets, or things the API image doesn't need.
+node_modules
+**/node_modules
+dist
+.git
+.github
+.env
+.env.*
+coverage
+docs
+tests
+apps/web-admin
+apps/mobile-scanner
+*.md

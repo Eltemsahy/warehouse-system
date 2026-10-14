@@ -30,3 +30,41 @@ jobs:
       - run: npm test
       # After the whole suite has hammered the ledger, the books must still balance.
       - run: npm run check:ledger
+
+  # The production image must migrate a fresh database, serve, and stop cleanly (P0-9).
+  image:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: wms
+          POSTGRES_PASSWORD: wms
+          POSTGRES_DB: wms
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U wms -d wms"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -f infra/Dockerfile -t wms-api .
+      - name: Start the image (it migrates, then serves)
+        run: |
+          docker run -d --name api --network host \
+            -e DATABASE_URL=postgres://wms:wms@localhost:5432/wms \
+            -e LEDGER_DRIVER=postgres \
+            wms-api
+          ready=0
+          for i in $(seq 1 30); do
+            if curl -fsS http://localhost:3000/health/ready; then ready=1; break; fi
+            sleep 1
+          done
+          docker logs api
+          test "$ready" = 1
+          docker logs api 2>&1 | grep "applying 000_platform.sql"
+      - name: Stop it (graceful shutdown must exit 0)
+        run: |
+          docker stop -t 15 api
+          test "$(docker inspect api --format '{{.State.ExitCode}}')" = 0

@@ -1,0 +1,24 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "outDir": "dist",
+    "noEmit": false,
+    "allowImportingTsExtensions": false,
+    "types": [
+      "node"
+    ]
+  },
+  "include": [
+    "apps/api",
+    "modules",
+    "shared",
+    "integrations",
+    "db"
+  ],
+  "exclude": [
+    "**/*.test.ts",
+    "node_modules",
+    "dist"
+  ]
+}
