@@ -52,7 +52,8 @@ Phase 0 (foundation hardening)
                                the inventory.StockTransferred payload.
   P0-7  Idempotency-Key ...... DONE once `npm test` is green (see section 8):
                                shared/http middleware + platform.idempotency_key.
-  P0-8  Ledger integrity job . TODO.
+  P0-8  Ledger integrity job . DONE once `npm test` is green (see section 9):
+                               nightly check + `npm run check:ledger` + CI step.
   P0-9  Image runs migrations; readiness endpoint; graceful shutdown ... TODO.
   P0-10 CI: lint, prettier, Postgres service ... TODO.
   P0-11 Workspace layout for apps/web-admin ... TODO (decide).
@@ -64,7 +65,7 @@ G8 (no auth), G10 (workspaces).
 
 5. NEXT UP
 ----------
-Order: Express 5 upgrade (G12) -> P0-9/P0-10 -> P0-8, then Phase 1 (P1-7 ADR first,
+Order: Express 5 upgrade (G12) -> P0-9/P0-10, then Phase 1 (P1-7 ADR first,
 then identity, locations, catalog).
 Before first production data: decide ledger partitioning (X-4). The primary key
 becomes (id, occurred_at); this is hard to change later.
@@ -133,3 +134,30 @@ becomes (id, occurred_at); this is hard to change later.
     into 500s, so the middleware releases the key. Do this before P0-9.
 - TODO: schedule store.purgeExpired() (delete expired rows) once background jobs exist;
   scope keys by the real user id when identity lands.
+
+9. LEDGER INTEGRITY (P0-8, TRD s10, PRD metric "0 rows in nightly reconciliation")
+-------------------------------------------------------------------------------
+- Rule (ADR 0002): for every (sku, location_id), sum(quantity_delta) over
+  inventory.stock_movements must equal inventory.stock_levels.quantity.
+- Pieces:
+  * LedgerAuditor port + PgLedgerAuditor: one read-only SQL statement (FULL OUTER JOIN of the
+    summed ledger and stock_levels). One statement = one snapshot, so a write that is half
+    way through its transaction can never raise a false alarm. It also catches a movement
+    with no balance row and a balance row with no movements.
+  * CheckLedgerIntegrity (use case): logs at INFO when clean, at ERROR when not
+    ("ledger integrity check FAILED ...", with the first 10 pairs). Lists at most 100
+    pairs and says when it was truncated. The ERROR log line is the alert hook.
+  * DailyJob (shared/jobs): runs it every day at LEDGER_INTEGRITY_HOUR_UTC (default 2),
+    only when LEDGER_DRIVER=postgres. In-process; no memory of past runs; with several app
+    instances each one runs it (harmless, but the alert repeats).
+  * `npm run check:ledger` (db/check-ledger.ts): runs it once. Exit 0 = consistent,
+    1 = mismatch, 2 = could not run. Use it from an external scheduler if preferred.
+  * CI runs `npm run check:ledger` after the whole test suite, so every build proves the
+    suite left the books balanced.
+- On a mismatch: do NOT edit stock_levels by hand. Work out which side is right from the
+  movements (reference_id, occurred_at), then correct with a new ADJUSTMENT movement
+  (ADR 0002: corrections are new movements, never edits).
+- TODO: it scans the whole ledger, fine for now. Once the ledger is partitioned by month,
+  compare against stock_snapshot_daily and only re-sum recent partitions. Record each run
+  in platform.job_run once the background-job tables exist (Schema doc, platform schema);
+  add a metric/alert on the error log line (P0-9).

@@ -11,6 +11,7 @@
     "test": "vitest run",
     "lint:deps": "depcruise modules shared apps --config .dependency-cruiser.cjs",
     "migrate": "tsx db/migrate.ts",
+    "check:ledger": "tsx db/check-ledger.ts",
     "lint": "eslint .",
     "format": "prettier --write ."
   },
