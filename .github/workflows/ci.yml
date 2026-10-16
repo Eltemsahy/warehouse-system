@@ -1,6 +1,30 @@
 name: ci
 on: [push, pull_request]
+
+# A newer push to the same branch makes the older run pointless.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
 jobs:
+  # Style and static checks. No database needed, so it is quick.
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20, cache: npm }
+      - run: npm ci
+      - run: npm run format:check
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm run lint:deps
+      - run: npm run build
+
+  # Every test, including the Postgres contract suites, against a real database.
   test:
     runs-on: ubuntu-latest
     services:
@@ -24,8 +48,6 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 20, cache: npm }
       - run: npm ci
-      - run: npm run typecheck
-      - run: npm run lint:deps
       - run: npm run migrate
       - run: npm test
       # After the whole suite has hammered the ledger, the books must still balance.
