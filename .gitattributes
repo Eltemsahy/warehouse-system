@@ -1,2 +1,5 @@
-# Shell scripts must keep LF endings, or the container cannot run them.
+# One line-ending style everywhere. Without this, a Windows checkout turns files into CRLF,
+# and `prettier --check` then fails locally while passing in CI. Shell scripts must be LF,
+# or the container cannot run them.
+* text=auto eol=lf
 *.sh text eol=lf

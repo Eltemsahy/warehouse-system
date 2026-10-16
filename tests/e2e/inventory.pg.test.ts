@@ -14,7 +14,9 @@ describe.skipIf(!enabled)("inventory (postgres)", () => {
     await inv.adjust.execute({ sku, locationId: "A-01", delta: 10, reason: "seed" });
 
     const results = await Promise.all(
-      Array.from({ length: 20 }, () => inv.adjust.execute({ sku, locationId: "A-01", delta: -1, reason: "race" })),
+      Array.from({ length: 20 }, () =>
+        inv.adjust.execute({ sku, locationId: "A-01", delta: -1, reason: "race" }),
+      ),
     );
 
     expect(results.filter((r) => r.ok)).toHaveLength(10);

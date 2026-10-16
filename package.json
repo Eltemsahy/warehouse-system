@@ -14,7 +14,8 @@
     "migrate:prod": "node dist/db/migrate.js",
     "check:ledger": "tsx db/check-ledger.ts",
     "lint": "eslint .",
-    "format": "prettier --write ."
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
   },
   "dependencies": {
     "dotenv": "^18.0.7",

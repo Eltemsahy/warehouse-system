@@ -8,13 +8,23 @@ describe("inventory", () => {
 
   it("adjusts stock and derives balance from the ledger", async () => {
     const inv = setup();
-    await inv.adjust.execute({ sku: "SKU-1", locationId: "A-01", delta: 10, reason: "initial count" });
+    await inv.adjust.execute({
+      sku: "SKU-1",
+      locationId: "A-01",
+      delta: 10,
+      reason: "initial count",
+    });
     expect(await inv.getBalance("SKU-1", "A-01")).toBe(10);
   });
 
   it("rejects negative balances", async () => {
     const inv = setup();
-    const r = await inv.adjust.execute({ sku: "SKU-1", locationId: "A-01", delta: -1, reason: "oops" });
+    const r = await inv.adjust.execute({
+      sku: "SKU-1",
+      locationId: "A-01",
+      delta: -1,
+      reason: "oops",
+    });
     expect(r.ok).toBe(false);
   });
 
@@ -64,7 +74,12 @@ describe("inventory", () => {
 
     it("queues nothing when the operation is rejected", async () => {
       const { inv, drain } = wired();
-      const r = await inv.adjust.execute({ sku: "SKU-1", locationId: "A-01", delta: -1, reason: "oops" });
+      const r = await inv.adjust.execute({
+        sku: "SKU-1",
+        locationId: "A-01",
+        delta: -1,
+        reason: "oops",
+      });
       expect(r.ok).toBe(false);
       expect(await drain()).toEqual([]);
     });

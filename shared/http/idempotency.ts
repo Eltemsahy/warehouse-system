@@ -112,10 +112,14 @@ export function idempotency(
           return;
         case "in_progress":
           res.setHeader("Retry-After", "1");
-          res.status(409).json({ error: "a request with this Idempotency-Key is still in progress" });
+          res
+            .status(409)
+            .json({ error: "a request with this Idempotency-Key is still in progress" });
           return;
         case "mismatch":
-          res.status(422).json({ error: "Idempotency-Key was already used with a different request" });
+          res
+            .status(422)
+            .json({ error: "Idempotency-Key was already used with a different request" });
           return;
         case "claimed":
           recordResponse(store, key, userId, res);

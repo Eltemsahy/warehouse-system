@@ -6,7 +6,9 @@ import { idempotencyStoreContract } from "./idempotency-store.contract.js";
 // In-memory always runs. Postgres runs only with LEDGER_DRIVER=postgres and DATABASE_URL set
 // (CI does this against a service container).
 const postgresEnabled = process.env.LEDGER_DRIVER === "postgres";
-const pool = postgresEnabled ? new pg.Pool({ connectionString: process.env.DATABASE_URL }) : undefined;
+const pool = postgresEnabled
+  ? new pg.Pool({ connectionString: process.env.DATABASE_URL })
+  : undefined;
 
 afterAll(async () => {
   await pool?.end();

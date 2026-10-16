@@ -31,9 +31,7 @@ import {
 /** The ledger, the outbox, the idempotency records and the auditor share one store. */
 function createPersistence() {
   if (config.LEDGER_DRIVER === "postgres") {
-    const readiness: ReadinessCheck[] = [
-      { name: "database", check: () => pool.query("SELECT 1") },
-    ];
+    const readiness: ReadinessCheck[] = [{ name: "database", check: () => pool.query("SELECT 1") }];
     return {
       ledger: new PgStockLedger(pool),
       auditor: new PgLedgerAuditor(pool),

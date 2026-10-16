@@ -3,22 +3,13 @@
   "compilerOptions": {
     "rootDir": ".",
     "outDir": "dist",
+    // The root config is for type-checking only (noEmit, bundler-style imports).
+    // The production build must override both: tsc refuses to emit while
+    // allowImportingTsExtensions is on.
     "noEmit": false,
     "allowImportingTsExtensions": false,
-    "types": [
-      "node"
-    ]
+    "types": ["node"]
   },
-  "include": [
-    "apps/api",
-    "modules",
-    "shared",
-    "integrations",
-    "db"
-  ],
-  "exclude": [
-    "**/*.test.ts",
-    "node_modules",
-    "dist"
-  ]
+  "include": ["apps/api", "modules", "shared", "integrations", "db"],
+  "exclude": ["**/*.test.ts", "node_modules", "dist"]
 }

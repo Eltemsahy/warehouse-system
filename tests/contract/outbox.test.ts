@@ -16,7 +16,9 @@ import { outboxContract } from "./outbox.contract.js";
 // In-memory always runs. Postgres runs only with LEDGER_DRIVER=postgres and DATABASE_URL set
 // (CI does this against a service container).
 const postgresEnabled = process.env.LEDGER_DRIVER === "postgres";
-const pool = postgresEnabled ? new pg.Pool({ connectionString: process.env.DATABASE_URL }) : undefined;
+const pool = postgresEnabled
+  ? new pg.Pool({ connectionString: process.env.DATABASE_URL })
+  : undefined;
 
 afterAll(async () => {
   await pool?.end();
@@ -44,7 +46,12 @@ describe("OutboxRelay", () => {
     payload: {},
   });
   const deposit = () =>
-    createMovement({ sku: `SKU-${randomUUID()}`, locationId: "A-01", quantityDelta: 1, type: "ADJUSTMENT" });
+    createMovement({
+      sku: `SKU-${randomUUID()}`,
+      locationId: "A-01",
+      quantityDelta: 1,
+      type: "ADJUSTMENT",
+    });
 
   it("delivers committed events to bus subscribers and stops cleanly", async () => {
     const outbox = new InMemoryOutbox();

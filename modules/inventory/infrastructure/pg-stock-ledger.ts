@@ -27,7 +27,16 @@ export class PgStockLedger implements StockLedger {
           `INSERT INTO inventory.stock_movements
              (id, sku, location_id, quantity_delta, type, reason, reference_id, occurred_at)
            VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
-          [m.id, m.sku, m.locationId, m.quantityDelta, m.type, m.reason ?? null, m.referenceId ?? null, m.occurredAt],
+          [
+            m.id,
+            m.sku,
+            m.locationId,
+            m.quantityDelta,
+            m.type,
+            m.reason ?? null,
+            m.referenceId ?? null,
+            m.occurredAt,
+          ],
         );
         const updated = await client.query(
           `UPDATE inventory.stock_levels

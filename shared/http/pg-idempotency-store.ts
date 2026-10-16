@@ -69,7 +69,9 @@ export class PgIdempotencyStore implements IdempotencyStore {
   }
 
   async purgeExpired(): Promise<number> {
-    const r = await this.pool.query("DELETE FROM platform.idempotency_key WHERE expires_at <= now()");
+    const r = await this.pool.query(
+      "DELETE FROM platform.idempotency_key WHERE expires_at <= now()",
+    );
     return r.rowCount ?? 0;
   }
 }

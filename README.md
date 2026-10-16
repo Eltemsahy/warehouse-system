@@ -3,7 +3,8 @@
 Modular monolith (TypeScript, Express, Postgres). See `docs/adr/` for decisions.
 
 ## Quick start
-```bash
+
+````bash
 cp .env.example .env
 
 ## Database setup
@@ -16,7 +17,7 @@ Requires Docker Desktop (or the Docker engine) to be running.
 
 ```bash
 docker compose up -d db
-```
+````
 
 This starts Postgres 16 with user `wms`, password `wms`, and database `wms` on port 5432, matching the defaults in `.env.example`.
 
@@ -38,6 +39,7 @@ On Windows, `psql` is usually not on your PATH. Run it from `C:\Program Files\Po
 # macOS/Linux
 export DATABASE_URL=postgres://wms:wms@localhost:5433/wms
 ```
+
 ```powershell
 # PowerShell
 $env:DATABASE_URL="postgres://wms:wms@localhost:5433/wms"
@@ -55,48 +57,53 @@ npm run migrate
 
 npm install
 npm run migrate
-npm run dev          # http://localhost:3000/health
+npm run dev # http://localhost:3000/health
 
 npm test
-npm run lint:deps    # verifies module boundaries
+npm run lint:deps # verifies module boundaries
 
 cd apps/web-admin
 npm install
-npm run dev          # start the frontend
-```
+npm run dev # start the frontend
+
+````
 
 ## Try it
 ```bash
 curl -X POST localhost:3000/inventory/adjustments -H 'content-type: application/json' \
   -d '{"sku":"SKU-1","locationId":"A-01","delta":10,"reason":"initial count"}'
 curl localhost:3000/inventory/SKU-1/locations/A-01/balance
-```
+````
 
 ## Inventory storage
+
 The inventory ledger uses PostgreSQL by default. To use temporary in-memory storage instead, set `LEDGER_DRIVER` in PowerShell before starting the app:
+
 ```powershell
 
 $env:LEDGER_DRIVER = "memory"
 npm run dev
 
 ```
+
 In-memory data is kept only while the app is running. The app reads environment variables directly; it does not automatically load values from `.env`.
 
 ## Layout
+
 `apps/` entrypoints, `modules/` domain modules (api > application > domain <- infrastructure), `shared/` kernel/events/observability, `integrations/` external adapters, `db/` migrations, `docs/` ADRs and glossary.
 
 ## Status
-`inventory` supports in-memory and PostgreSQL ledgers. Other modules are empty scaffolds.
 
+`inventory` supports in-memory and PostgreSQL ledgers. Other modules are empty scaffolds.
 
 ## Git workflow
 
 We use two long-lived branches:
 
-| Branch    | Purpose                                              | Who pushes                         |
-|-----------|------------------------------------------------------|------------------------------------|
-| `staging` | Day-to-day work and integration testing              | Everyone                           |
-| `main`    | Verified, stable code only                           | Promotions from `staging` only     |
+| Branch    | Purpose                                 | Who pushes                     |
+| --------- | --------------------------------------- | ------------------------------ |
+| `staging` | Day-to-day work and integration testing | Everyone                       |
+| `main`    | Verified, stable code only              | Promotions from `staging` only |
 
 `main` never receives untested code, so it rarely needs to be reverted.
 
@@ -118,16 +125,16 @@ CI runs on every push. If it goes red, fix it before doing anything else, since 
 
 We use [Conventional Commits](https://www.conventionalcommits.org/): `type(scope): summary`, in the imperative mood, under about 72 characters.
 
-| Type       | Use for                                   |
-|------------|-------------------------------------------|
-| `feat`     | A new feature                             |
-| `fix`      | A bug fix                                 |
-| `refactor` | Code change that isn't a feature or fix   |
-| `test`     | Adding or changing tests                  |
-| `docs`     | Documentation only                        |
-| `chore`    | Tooling, dependencies, config             |
+| Type       | Use for                                 |
+| ---------- | --------------------------------------- |
+| `feat`     | A new feature                           |
+| `fix`      | A bug fix                               |
+| `refactor` | Code change that isn't a feature or fix |
+| `test`     | Adding or changing tests                |
+| `docs`     | Documentation only                      |
+| `chore`    | Tooling, dependencies, config           |
 
-The scope is usually the module name, e.g. `feat(inventory): add Postgres stock ledger`. Use the body to explain *why*, not to repeat the diff.
+The scope is usually the module name, e.g. `feat(inventory): add Postgres stock ledger`. Use the body to explain _why_, not to repeat the diff.
 
 ### Releasing to `main`
 

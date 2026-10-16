@@ -73,7 +73,9 @@ export class OutboxRelay {
       // A full batch means there is probably more waiting: go again straight away.
       if ((await this.flushOnce()) >= this.dispatchOptions.limit) delayMs = 0;
     } catch (e) {
-      logger.error("outbox relay pass failed", { error: e instanceof Error ? e.message : String(e) });
+      logger.error("outbox relay pass failed", {
+        error: e instanceof Error ? e.message : String(e),
+      });
     }
     if (this.running) this.schedule(delayMs);
   }

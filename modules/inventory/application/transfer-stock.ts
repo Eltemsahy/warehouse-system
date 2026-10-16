@@ -4,7 +4,12 @@ import { createMovement } from "../domain/stock-movement.js";
 import { stockTransferred } from "../domain/events.js";
 import type { StockLedger } from "./ports.js";
 
-export interface TransferStockInput { sku: string; from: string; to: string; quantity: number }
+export interface TransferStockInput {
+  sku: string;
+  from: string;
+  to: string;
+  quantity: number;
+}
 
 export class TransferStock {
   constructor(private ledger: StockLedger) {}
@@ -20,8 +25,20 @@ export class TransferStock {
     try {
       await this.ledger.append(
         [
-          createMovement({ sku: i.sku, locationId: i.from, quantityDelta: -i.quantity, type: "TRANSFER_OUT", referenceId: transferId }),
-          createMovement({ sku: i.sku, locationId: i.to, quantityDelta: i.quantity, type: "TRANSFER_IN", referenceId: transferId }),
+          createMovement({
+            sku: i.sku,
+            locationId: i.from,
+            quantityDelta: -i.quantity,
+            type: "TRANSFER_OUT",
+            referenceId: transferId,
+          }),
+          createMovement({
+            sku: i.sku,
+            locationId: i.to,
+            quantityDelta: i.quantity,
+            type: "TRANSFER_IN",
+            referenceId: transferId,
+          }),
         ],
         [stockTransferred({ ...i, transferId })],
       );

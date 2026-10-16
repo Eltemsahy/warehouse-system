@@ -1,0 +1,6 @@
+dist
+coverage
+node_modules
+package-lock.json
+# Has its own template style and will get its own setup (P0-11).
+apps/web-admin

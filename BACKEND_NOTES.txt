@@ -57,7 +57,8 @@ Phase 0 (foundation hardening)
   P0-9  Image migrates + serves; readiness endpoint; graceful shutdown
                                DONE once `npm test` is green and the image job in CI
                                passes (see section 10).
-  P0-10 CI: lint, prettier, Postgres service ... TODO.
+  P0-10 CI: lint, prettier, Postgres service ... DONE once `npm run format` has been run
+                               once and CI is green (see section 11).
   P0-11 Workspace layout for apps/web-admin ... TODO (decide).
 
 Known gaps to close (TRD s11): G1 (check-then-write is guarded by the DB CHECK
@@ -66,7 +67,7 @@ G8 (no auth), G10 (workspaces).
 
 5. NEXT UP
 ----------
-Order: P0-10 (lint, prettier, CI), then Phase 1 (P1-7 ADR first,
+Order: P0-11 (workspace layout), then Phase 1 (P1-7 ADR first,
 then identity, locations, catalog).
 Before first production data: decide ledger partitioning (X-4). The primary key
 becomes (id, occurred_at); this is hard to change later.
@@ -167,7 +168,10 @@ becomes (id, occurred_at); this is hard to change later.
 ------------------------------------------------------------
 - Build: `npm run build` uses tsconfig.build.json (apps/api, modules, shared, integrations, db;
   no tests, no web-admin) and then scripts/copy-migrations.mjs, because tsc does not emit
-  the .sql files. Output: dist/apps/api/src/main.js, dist/db/migrate.js,
+  the .sql files. The root tsconfig.json is type-check only (noEmit, allowImportingTsExtensions),
+  so tsconfig.build.json overrides both. If the build ever complains about another inherited
+  option, override it there the same way.
+  Output: dist/apps/api/src/main.js, dist/db/migrate.js,
   dist/db/migrations/*.sql. Scripts needed in package.json:
     "build": "tsc -p tsconfig.build.json && node scripts/copy-migrations.mjs"
     "migrate:prod": "node dist/db/migrate.js"
@@ -204,3 +208,22 @@ becomes (id, occurred_at); this is hard to change later.
 - TODO / noted: root package.json lists react and react-dom as runtime dependencies, which
   the API never uses (they belong to apps/web-admin) - clean up with P0-11 (workspaces).
   No metrics yet (TRD s7): add outbox lag and readiness failures when metrics land.
+
+11. STYLE AND CI (P0-10)
+------------------------
+- CI (.github/workflows/ci.yml) has three parallel jobs; any failure fails the run:
+  * quality: prettier --check, eslint, tsc --noEmit, dependency-cruiser (module
+    boundaries), and `npm run build` (catches a broken tsconfig.build.json early)
+  * test:    real Postgres 16 service, migrate, all tests (including the Postgres contract
+             suites), then check:ledger
+  * image:   builds the production image, runs it, checks it migrated and became ready,
+             and that `docker stop` exits 0
+- Style rules: .prettierrc (double quotes, semicolons, trailing commas, width 100) and
+  eslint.config.js. apps/web-admin is ignored by both until P0-11 decides its setup.
+- Format before you push:  npm run format   (CI runs: npm run format:check)
+- package.json scripts: "format": "prettier --write .", "format:check": "prettier --check ."
+- .gitattributes forces LF line endings. Without it a Windows checkout becomes CRLF and
+  `prettier --check` fails locally while passing in CI. After adding it, run once:
+  git add --renormalize .
+- Not done: a pre-commit hook (husky + lint-staged) would run format and lint on staged
+  files. Optional; add if CI failures for style become common.

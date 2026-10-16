@@ -96,7 +96,10 @@ export function stockLedgerContract(
       await ledger.append([move(sku, "A-01", 10)]);
       // First leg is valid; second withdraws from a location with no stock.
       await expect(
-        ledger.append([move(sku, "A-01", -4, "TRANSFER_OUT"), move(sku, "B-02", -1, "TRANSFER_OUT")]),
+        ledger.append([
+          move(sku, "A-01", -4, "TRANSFER_OUT"),
+          move(sku, "B-02", -1, "TRANSFER_OUT"),
+        ]),
       ).rejects.toBeInstanceOf(InsufficientStockError);
       expect(await ledger.balance(sku, "A-01")).toBe(10);
       expect(await ledger.balance(sku, "B-02")).toBe(0);

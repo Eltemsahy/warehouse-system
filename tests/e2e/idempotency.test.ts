@@ -19,7 +19,9 @@ import {
 } from "../../modules/inventory/index.js";
 
 const postgresEnabled = process.env.LEDGER_DRIVER === "postgres";
-const pool = postgresEnabled ? new pg.Pool({ connectionString: process.env.DATABASE_URL }) : undefined;
+const pool = postgresEnabled
+  ? new pg.Pool({ connectionString: process.env.DATABASE_URL })
+  : undefined;
 
 const closers: (() => Promise<void>)[] = [];
 afterAll(async () => {
@@ -218,9 +220,11 @@ function inventoryIdempotency(
           body: JSON.stringify({ sku, locationId: "A-01", delta, reason: "test" }),
         });
       const balance = async () =>
-        ((await (await fetch(`${url}/inventory/${sku}/locations/A-01/balance`)).json()) as {
-          balance: number;
-        }).balance;
+        (
+          (await (await fetch(`${url}/inventory/${sku}/locations/A-01/balance`)).json()) as {
+            balance: number;
+          }
+        ).balance;
       return { adjust, balance };
     }
 
