@@ -35,13 +35,13 @@ What does not exist yet:
 
 - **Authentication and authorisation.** Every route is open, so do not expose the API publicly yet.
 - **The other modules.** `catalog`, `identity`, `inbound`, `locations`, `outbound` and `shipping` are empty scaffolds, as is `integrations/`.
-- **The frontend in CI.** `apps/web-admin` is in early development and is not linted, formatted or built by CI yet. `apps/mobile-scanner` is a placeholder.
+- **A finished frontend.** `apps/web-admin` is in early development. It is linted and built by its own CI job, but it is not covered by the root Prettier setup. `apps/mobile-scanner` is a placeholder.
 
 For the build status against the implementation plan, and the design decisions behind it, see `BACKEND_NOTES.txt`.
 
 ## Requirements
 
-- Node.js 20.11 or newer (CI and the Docker image use Node 20)
+- Node.js 20.19 or newer (the frontend toolchain needs it; CI and the Docker image currently use Node 20)
 - npm
 - PostgreSQL 16 or newer, installed locally or run through Docker (Docker is optional)
 
@@ -152,13 +152,14 @@ npm start
 
 ### Frontend
 
-`apps/web-admin` is a React + Vite app with its own `package.json`:
+`apps/web-admin` is a React + Vite app. It is an independent package with its own `package.json`, lockfile and toolchain (see `docs/adr/0003-independent-frontend-packages.md`), so it needs its own install. From the repo root:
 
 ```bash
-cd apps/web-admin
-npm install
-npm run dev     # usually http://localhost:5173
+npm run web:install
+npm run web:dev     # usually http://localhost:5173
 ```
+
+Or work inside the folder directly: `cd apps/web-admin`, then `npm install` and `npm run dev`.
 
 ## API
 
@@ -246,7 +247,7 @@ Errors are JSON of the form `{"error": "message"}`. A `400` caused by an invalid
 ```text
 apps/
   api/             Express API (composition root: src/app.ts, entry: src/main.ts)
-  web-admin/       React + Vite frontend (own package.json)
+  web-admin/       React + Vite frontend (independent package: own package.json and lockfile)
   mobile-scanner/  placeholder for the handheld/PWA picker app
 modules/           one folder per domain module
   inventory/       implemented
@@ -281,6 +282,10 @@ tests/             unit/, contract/, e2e/, helpers/
 | `npm run lint:deps`    | Verifies module boundaries (dependency-cruiser)                                       |
 | `npm run format`       | Formats the code with Prettier                                                        |
 | `npm run format:check` | Fails if anything is not formatted (this is what CI runs)                             |
+| `npm run web:install`  | Installs the frontend's dependencies (`apps/web-admin`)                               |
+| `npm run web:dev`      | Starts the frontend dev server                                                        |
+| `npm run web:build`    | Builds the frontend                                                                   |
+| `npm run web:lint`     | Lints the frontend                                                                    |
 
 ## Testing
 
@@ -318,11 +323,12 @@ Notes:
 
 ### Continuous integration
 
-CI (`.github/workflows/ci.yml`) runs three jobs in parallel, and any failure fails the run:
+CI (`.github/workflows/ci.yml`) runs four jobs in parallel, and any failure fails the run:
 
 - **quality:** Prettier check, ESLint, type-check, module boundaries and the production build.
 - **test:** all tests against a PostgreSQL 16 service, then the ledger integrity check.
 - **image:** builds the Docker image, starts it against PostgreSQL, checks it migrated and became ready, and checks that `docker stop` exits cleanly.
+- **web-admin:** installs the frontend on its own, then lints and builds it.
 
 ## Code quality
 
@@ -332,7 +338,7 @@ CI (`.github/workflows/ci.yml`) runs three jobs in parallel, and any failure fai
 - **TypeScript** runs in strict mode (`npm run typecheck`).
 - **Line endings** are LF everywhere (`.gitattributes`). On Windows this keeps `prettier --check` consistent with CI.
 
-`apps/web-admin` is excluded from ESLint and Prettier for now.
+`apps/web-admin` is an independent package with its own toolchain. It has its own ESLint config and its own CI job (`npm run web:lint`, `npm run web:build`), and it is excluded from the root ESLint and Prettier.
 
 ## Docker and deployment
 
@@ -433,8 +439,8 @@ If you want a review step, open a pull request from `staging` to `main` and merg
 
 Before promoting, check that:
 
-- CI is green on `staging` (all three jobs)
-- `npm run format:check`, `npm run lint`, `npm run typecheck`, `npm run lint:deps`, `npm run build` and `npm test` pass locally
+- CI is green on `staging` (all four jobs)
+- `npm run format:check`, `npm run lint`, `npm run typecheck`, `npm run lint:deps`, `npm run build` and `npm test` pass locally (and `npm run web:build` if you touched the frontend)
 - For database changes: `npm run migrate && LEDGER_DRIVER=postgres npm test && npm run check:ledger`
 
 ### Rules
@@ -457,7 +463,7 @@ git push
 
 ### Recommended GitHub settings
 
-- Protect `main`: require the `quality`, `test` and `image` checks to pass and block direct pushes.
+- Protect `main`: require the `quality`, `test`, `image` and `web-admin` checks to pass and block direct pushes.
 - Keep `staging` unprotected enough that the team can push, but require CI to pass on it as a convention.
 
 ## Troubleshooting
@@ -466,12 +472,13 @@ git push
 - **`failed to connect to the docker API`:** Docker Desktop is not running. Start it and wait for "Engine running", or use Option B and skip Docker.
 - **`psql` is not recognized (Windows):** it is not on your PATH. Run it by its full path (see Option B) or use pgAdmin's Query Tool.
 - **`client password must be a string` in tests or scripts:** `DATABASE_URL` is not set. Check that `.env` exists and contains it.
+- **`Cannot find module 'react'` (or `vite`) when working on the frontend:** the frontend no longer shares the root's `node_modules`. Run `npm run web:install`.
 - **`/health/ready` returns `503`:** the database is unreachable, or the app is shutting down. The server log says which check failed.
 - **A request keeps returning `409`:** an earlier request with the same `Idempotency-Key` is still marked in progress, which can happen if the app was killed mid-request. Use a new key, or see `BACKEND_NOTES.txt` (Idempotency) for how to clear it safely.
 - **`prettier --check` fails on every file (Windows):** line endings. Run `git add --renormalize .` and then `npm run format`.
 
 ## Further reading
 
-- `docs/adr/`: architecture decisions (modular monolith, inventory ledger)
+- `docs/adr/`: architecture decisions (modular monolith, inventory ledger, independent frontend packages)
 - `docs/domain/glossary.md`: warehouse terms used in the code
 - `BACKEND_NOTES.txt`: build status against the implementation plan, conventions and known limits

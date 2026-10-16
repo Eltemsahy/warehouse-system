@@ -59,16 +59,17 @@ Phase 0 (foundation hardening)
                                passes (see section 10).
   P0-10 CI: lint, prettier, Postgres service ... DONE once `npm run format` has been run
                                once and CI is green (see section 11).
-  P0-11 Workspace layout for apps/web-admin ... TODO (decide).
+  P0-11 Workspace layout for apps/web-admin ... DONE once the steps in section 12 are applied
+                               (ADR 0003: independent packages). Phase 0 is then complete.
 
 Known gaps to close (TRD s11): G1 (check-then-write is guarded by the DB CHECK
 only), G12 NEW, not in the TRD: see section 8 (closed by the Express 5 upgrade + error handler),
-G8 (no auth), G10 (workspaces).
+G8 (no auth). G10 (workspaces) is closed: see section 12.
 
 5. NEXT UP
 ----------
-Order: P0-11 (workspace layout), then Phase 1 (P1-7 ADR first,
-then identity, locations, catalog).
+Order: Phase 0 is complete. Next is Phase 1: P1-7 first (the tenancy, quantity and key ADR,
+numbered 0004 because 0003 is the frontend decision), then identity, locations, catalog.
 Before first production data: decide ledger partitioning (X-4). The primary key
 becomes (id, occurred_at); this is hard to change later.
 
@@ -205,8 +206,7 @@ becomes (id, occurred_at); this is hard to change later.
   /health/ready, checks the log shows the migrations ran, then `docker stop` must exit 0.
 - Not verified here (no Docker in the authoring sandbox): the Dockerfile itself and the
   `image` CI job. The build output layout and the logic were checked; run the image once.
-- TODO / noted: root package.json lists react and react-dom as runtime dependencies, which
-  the API never uses (they belong to apps/web-admin) - clean up with P0-11 (workspaces).
+- Root react/react-dom dependencies: removed under P0-11 (section 12).
   No metrics yet (TRD s7): add outbox lag and readiness failures when metrics land.
 
 11. STYLE AND CI (P0-10)
@@ -219,7 +219,8 @@ becomes (id, occurred_at); this is hard to change later.
   * image:   builds the production image, runs it, checks it migrated and became ready,
              and that `docker stop` exits 0
 - Style rules: .prettierrc (double quotes, semicolons, trailing commas, width 100) and
-  eslint.config.js. apps/web-admin is ignored by both until P0-11 decides its setup.
+  eslint.config.js. apps/web-admin is ignored by both: it is an independent package with its own ESLint
+  config and CI job (section 12).
 - Format before you push:  npm run format   (CI runs: npm run format:check)
 - package.json scripts: "format": "prettier --write .", "format:check": "prettier --check ."
 - .gitattributes forces LF line endings. Without it a Windows checkout becomes CRLF and
@@ -227,3 +228,27 @@ becomes (id, occurred_at); this is hard to change later.
   git add --renormalize .
 - Not done: a pre-commit hook (husky + lint-staged) would run format and lint on staged
   files. Optional; add if CI failures for style become common.
+
+12. FRONTEND PACKAGES (P0-11, TRD G10, ADR 0003)
+------------------------------------------------
+- Decision: no npm workspaces. apps/web-admin is an independent package (own package.json,
+  own package-lock.json, own toolchain: Vite 8, TypeScript 6, ESLint 10). The root package
+  is the backend only. Reasons and the conditions for revisiting: docs/adr/0003-*.md.
+- Root changes that go with it:
+  * remove react, react-dom, @types/react, @types/react-dom, @vitejs/plugin-react and vite
+    from the root package (Vitest still brings in the Vite it needs):
+      npm uninstall react react-dom @types/react @types/react-dom @vitejs/plugin-react vite
+  * tsconfig.json: remove "jsx" and "types": ["vite/client"], and change the include entry
+    "apps" to "apps/api", so the root no longer type-checks the frontend with its own,
+    older TypeScript
+  * package.json scripts that delegate to the frontend:
+      "web:install": "npm --prefix apps/web-admin install"
+      "web:dev":     "npm --prefix apps/web-admin run dev"
+      "web:build":   "npm --prefix apps/web-admin run build"
+      "web:lint":    "npm --prefix apps/web-admin run lint"
+- CI: a separate `web-admin` job runs npm ci, lint and build inside apps/web-admin, caching
+  on its own lockfile. The frontend is still excluded from the root ESLint and Prettier.
+- apps/mobile-scanner follows the same pattern when it is created.
+- Node versions: the frontend toolchain needs Node 20.19 or newer. Node 20 reached its
+  scheduled end of life in April 2026; CI and the Docker image still use it. Consider moving
+  to Node 22 or 24 (local development already runs 24) as a small separate change.
