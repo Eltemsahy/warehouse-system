@@ -24,6 +24,23 @@ jobs:
       - run: npm run lint:deps
       - run: npm run build
 
+  # The frontend is an independent package (ADR 0003), so it is checked on its own.
+  web-admin:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/web-admin
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: apps/web-admin/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run build
+
   # Every test, including the Postgres contract suites, against a real database.
   test:
     runs-on: ubuntu-latest
