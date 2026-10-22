@@ -20,8 +20,8 @@ against them. If something here disagrees with a plan, fix one of them.
 - Single organisation, no multi-tenancy (no tenant_id). Users manage their own
   warehouse(s). Warehouse scoping still applies (warehouse_id on operational tables).
 - Quantities are integers in the item's base UoM. Revisit only if needed.
-- Inventory keeps text sku / location_id (business codes), per Schema doc s1.
-  (Default from the Schema doc; confirm in the P1-7 ADR.)
+- Inventory keeps text sku / location_id (business codes). PROPOSED in ADR 0004, pending the
+  owner's confirmation: location codes unique across the whole organisation, codes immutable.
 - ERP / carrier / e-commerce vendors: not decided. Ports stay owned by the
   consuming module.
 
@@ -252,3 +252,17 @@ becomes (id, occurred_at); this is hard to change later.
 - Node versions: the frontend toolchain needs Node 20.19 or newer. Node 20 reached its
   scheduled end of life in April 2026; CI and the Docker image still use it. Consider moving
   to Node 22 or 24 (local development already runs 24) as a small separate change.
+
+13. PHASE 1 STATUS AND FINDINGS
+-------------------------------
+  P1-7  ADR tenancy / quantities / keys ... DRAFTED: docs/adr/0004-*.md (Proposed). Becomes
+                               Accepted once the location-code decision below is confirmed.
+  P1-1 identity, P1-2 audit, P1-3 locations, P1-4 catalog, P1-5 inventory validation,
+  P1-6 seed data ... TODO.
+- G13 (NEW, found while writing ADR 0004, not in the TRD gap list): the Schema doc makes
+  location.code unique per warehouse, UNIQUE(warehouse_id, code), but inventory keys
+  stock_levels on (sku, location_id) with the code alone. Two warehouses that both have a
+  location "A-01" would share one balance. ADR 0004 resolves it by making location codes
+  unique across the organisation (the locations module enforces UNIQUE(code)).
+- Edits the Schema doc needs once ADR 0004 is accepted: location code uniqueness becomes
+  organisation-wide; section 14 items 1 to 3 are closed.
