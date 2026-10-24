@@ -20,8 +20,9 @@ against them. If something here disagrees with a plan, fix one of them.
 - Single organisation, no multi-tenancy (no tenant_id). Users manage their own
   warehouse(s). Warehouse scoping still applies (warehouse_id on operational tables).
 - Quantities are integers in the item's base UoM. Revisit only if needed.
-- Inventory keeps text sku / location_id (business codes). PROPOSED in ADR 0004, pending the
-  owner's confirmation: location codes unique across the whole organisation, codes immutable.
+- Inventory keeps text sku / location_id (business codes) and adds the warehouse to every key:
+  PROPOSED in ADR 0004, pending the owner's confirmation. Location codes stay unique per
+  warehouse; codes are immutable within their scope.
 - ERP / carrier / e-commerce vendors: not decided. Ports stay owned by the
   consuming module.
 
@@ -262,7 +263,11 @@ becomes (id, occurred_at); this is hard to change later.
 - G13 (NEW, found while writing ADR 0004, not in the TRD gap list): the Schema doc makes
   location.code unique per warehouse, UNIQUE(warehouse_id, code), but inventory keys
   stock_levels on (sku, location_id) with the code alone. Two warehouses that both have a
-  location "A-01" would share one balance. ADR 0004 resolves it by making location codes
-  unique across the organisation (the locations module enforces UNIQUE(code)).
-- Edits the Schema doc needs once ADR 0004 is accepted: location code uniqueness becomes
-  organisation-wide; section 14 items 1 to 3 are closed.
+  location "A-01" would share one balance. A first draft made location codes organisation-wide
+  unique; the owner rejected that (it forces a naming convention onto users and contradicts
+  the Schema doc). ADR 0004 now proposes adding warehouse_id first in every inventory key.
+- Edits the Schema doc needs once ADR 0004 is accepted: stock_levels key and stock_movements
+  index gain warehouse_id first; section 14 items 1 to 3 are closed.
+- P1-7b (new, follows the ADR): inventory keyed by warehouse. Migration 005 + refactor of
+  StockMovement, the StockLedger port, use cases, routes, event payloads, integrity check,
+  contract tests and README. TODO after the ADR is accepted.
