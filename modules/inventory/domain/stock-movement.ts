@@ -5,7 +5,10 @@ export type MovementType = "RECEIPT" | "ISSUE" | "ADJUSTMENT" | "TRANSFER_IN" | 
 /** One immutable line in the stock ledger. Balances are derived from these. */
 export interface StockMovement {
   readonly id: string;
+  /** The warehouse leads every inventory key (ADR 0004). */
+  readonly warehouseId: string;
   readonly sku: string;
+  /** Location code, unique within its warehouse. */
   readonly locationId: string;
   readonly quantityDelta: number; // signed
   readonly type: MovementType;

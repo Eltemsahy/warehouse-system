@@ -213,17 +213,20 @@ function inventoryIdempotency(
       app.use("/inventory", createInventoryModule({ ledger }).router);
       const url = await serve(app);
       const sku = `SKU-${randomUUID()}`;
+      const warehouseId = randomUUID();
       const adjust = (delta: number, key?: string) =>
-        fetch(`${url}/inventory/adjustments`, {
+        fetch(`${url}/inventory/warehouses/${warehouseId}/adjustments`, {
           method: "POST",
           headers: { ...json, ...(key ? { "idempotency-key": key } : {}) },
           body: JSON.stringify({ sku, locationId: "A-01", delta, reason: "test" }),
         });
       const balance = async () =>
         (
-          (await (await fetch(`${url}/inventory/${sku}/locations/A-01/balance`)).json()) as {
-            balance: number;
-          }
+          (await (
+            await fetch(
+              `${url}/inventory/warehouses/${warehouseId}/skus/${sku}/locations/A-01/balance`,
+            )
+          ).json()) as { balance: number }
         ).balance;
       return { adjust, balance };
     }

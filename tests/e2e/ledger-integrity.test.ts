@@ -10,7 +10,10 @@ import {
 } from "../../modules/inventory/index.js";
 import { createMovement } from "../../modules/inventory/domain/stock-movement.js";
 
+const WH = "00000000-0000-0000-0000-000000000001";
+
 const discrepancy = (n: number): LedgerDiscrepancy => ({
+  warehouseId: WH,
   sku: `SKU-${n}`,
   locationId: "A-01",
   ledgerQuantity: 10,
@@ -59,7 +62,7 @@ describe("CheckLedgerIntegrity", () => {
     expect(spy.error).toHaveLength(0);
   });
 
-  it("fails with an error log that names the mismatching pairs", async () => {
+  it("fails with an error log that names the mismatching keys", async () => {
     const { auditor } = fakeAuditor([discrepancy(1), discrepancy(2)]);
     const spy = spyLog();
 
@@ -102,53 +105,82 @@ describe.skipIf(!postgresEnabled)("PgLedgerAuditor", () => {
   const ledger = new PgStockLedger(pool);
   const auditor = new PgLedgerAuditor(pool);
   const newSku = () => `SKU-${randomUUID()}`;
-  const deposit = (sku: string, delta: number) =>
-    createMovement({ sku, locationId: "A-01", quantityDelta: delta, type: "ADJUSTMENT" });
+  const newWarehouse = () => randomUUID();
+  const deposit = (warehouseId: string, sku: string, delta: number) =>
+    createMovement({
+      warehouseId,
+      sku,
+      locationId: "A-01",
+      quantityDelta: delta,
+      type: "ADJUSTMENT",
+    });
 
   // The shared dev database may hold unrelated rows, so every check looks at one SKU only.
   const forSku = async (sku: string) =>
     (await auditor.findDiscrepancies(100_000)).filter((d) => d.sku === sku);
 
   it("finds nothing when movements and balances agree", async () => {
-    const sku = newSku();
-    await ledger.append([deposit(sku, 10)]);
-    await ledger.append([deposit(sku, -3)]);
+    const [w, sku] = [newWarehouse(), newSku()];
+    await ledger.append([deposit(w, sku, 10)]);
+    await ledger.append([deposit(w, sku, -3)]);
     expect(await forSku(sku)).toEqual([]);
   });
 
   it("finds a cached balance that drifted from the ledger", async () => {
-    const sku = newSku();
-    await ledger.append([deposit(sku, 10)]);
+    const [w, sku] = [newWarehouse(), newSku()];
+    await ledger.append([deposit(w, sku, 10)]);
     await pool.query(
-      "UPDATE inventory.stock_levels SET quantity = quantity + 1 WHERE sku = $1 AND location_id = 'A-01'",
-      [sku],
+      `UPDATE inventory.stock_levels SET quantity = quantity + 1
+        WHERE warehouse_id = $1 AND sku = $2 AND location_id = 'A-01'`,
+      [w, sku],
     );
     try {
       expect(await forSku(sku)).toEqual([
-        { sku, locationId: "A-01", ledgerQuantity: 10, cachedQuantity: 11 },
+        { warehouseId: w, sku, locationId: "A-01", ledgerQuantity: 10, cachedQuantity: 11 },
       ]);
     } finally {
       await pool.query(
-        "UPDATE inventory.stock_levels SET quantity = quantity - 1 WHERE sku = $1 AND location_id = 'A-01'",
-        [sku],
+        `UPDATE inventory.stock_levels SET quantity = quantity - 1
+          WHERE warehouse_id = $1 AND sku = $2 AND location_id = 'A-01'`,
+        [w, sku],
       );
     }
     expect(await forSku(sku)).toEqual([]);
   });
 
-  it("finds a movement that has no balance row", async () => {
-    const sku = newSku();
-    const id = randomUUID();
-    // Bypasses the ledger on purpose, to simulate corruption. The test removes the row
-    // afterwards; the ledger itself is append-only.
+  it("flags only the warehouse whose balance drifted", async () => {
+    const [w1, w2, sku] = [newWarehouse(), newWarehouse(), newSku()];
+    await ledger.append([deposit(w1, sku, 10), deposit(w2, sku, 10)]);
     await pool.query(
-      `INSERT INTO inventory.stock_movements (id, sku, location_id, quantity_delta, type)
-       VALUES ($1, $2, 'A-01', 7, 'ADJUSTMENT')`,
-      [id, sku],
+      `UPDATE inventory.stock_levels SET quantity = quantity + 1
+        WHERE warehouse_id = $1 AND sku = $2 AND location_id = 'A-01'`,
+      [w2, sku],
     );
     try {
       expect(await forSku(sku)).toEqual([
-        { sku, locationId: "A-01", ledgerQuantity: 7, cachedQuantity: 0 },
+        { warehouseId: w2, sku, locationId: "A-01", ledgerQuantity: 10, cachedQuantity: 11 },
+      ]);
+    } finally {
+      await pool.query(
+        `UPDATE inventory.stock_levels SET quantity = quantity - 1
+          WHERE warehouse_id = $1 AND sku = $2 AND location_id = 'A-01'`,
+        [w2, sku],
+      );
+    }
+  });
+
+  it("finds a movement that has no balance row", async () => {
+    const [w, sku, id] = [newWarehouse(), newSku(), randomUUID()];
+    // Bypasses the ledger on purpose, to simulate corruption. The test removes the row
+    // afterwards; the ledger itself is append-only.
+    await pool.query(
+      `INSERT INTO inventory.stock_movements (id, warehouse_id, sku, location_id, quantity_delta, type)
+       VALUES ($1, $2, $3, 'A-01', 7, 'ADJUSTMENT')`,
+      [id, w, sku],
+    );
+    try {
+      expect(await forSku(sku)).toEqual([
+        { warehouseId: w, sku, locationId: "A-01", ledgerQuantity: 7, cachedQuantity: 0 },
       ]);
     } finally {
       await pool.query("DELETE FROM inventory.stock_movements WHERE id = $1", [id]);
@@ -156,14 +188,15 @@ describe.skipIf(!postgresEnabled)("PgLedgerAuditor", () => {
   });
 
   it("finds a balance row that has no movements", async () => {
-    const sku = newSku();
+    const [w, sku] = [newWarehouse(), newSku()];
     await pool.query(
-      "INSERT INTO inventory.stock_levels (sku, location_id, quantity) VALUES ($1, 'A-01', 5)",
-      [sku],
+      `INSERT INTO inventory.stock_levels (warehouse_id, sku, location_id, quantity)
+       VALUES ($1, $2, 'A-01', 5)`,
+      [w, sku],
     );
     try {
       expect(await forSku(sku)).toEqual([
-        { sku, locationId: "A-01", ledgerQuantity: 0, cachedQuantity: 5 },
+        { warehouseId: w, sku, locationId: "A-01", ledgerQuantity: 0, cachedQuantity: 5 },
       ]);
     } finally {
       await pool.query("DELETE FROM inventory.stock_levels WHERE sku = $1", [sku]);
@@ -171,12 +204,12 @@ describe.skipIf(!postgresEnabled)("PgLedgerAuditor", () => {
   });
 
   it("never raises a false alarm while writes are in flight", async () => {
-    const sku = newSku();
-    await ledger.append([deposit(sku, 1000)]);
+    const [w, sku] = [newWarehouse(), newSku()];
+    await ledger.append([deposit(w, sku, 1000)]);
 
     let writing = true;
     const writers = Promise.all(
-      Array.from({ length: 30 }, () => ledger.append([deposit(sku, -1)])),
+      Array.from({ length: 30 }, () => ledger.append([deposit(w, sku, -1)])),
     );
     const seen: LedgerDiscrepancy[] = [];
     const auditing = (async () => {

@@ -9,6 +9,7 @@ export const stockAdjusted = (m: StockMovement): DomainEvent<StockMovement> => (
 });
 
 export const stockTransferred = (p: {
+  warehouseId: string;
   sku: string;
   from: string;
   to: string;

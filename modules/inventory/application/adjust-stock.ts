@@ -5,6 +5,7 @@ import { stockAdjusted } from "../domain/events.js";
 import type { StockLedger } from "./ports.js";
 
 export interface AdjustStockInput {
+  warehouseId: string;
   sku: string;
   locationId: string;
   delta: number;
@@ -16,11 +17,13 @@ export class AdjustStock {
 
   async execute(i: AdjustStockInput): Promise<Result<StockMovement>> {
     if (i.delta === 0) return err(new Error("delta must be non-zero"));
-    const current = await this.ledger.balance(i.sku, i.locationId);
-    if (current + i.delta < 0)
+    const current = await this.ledger.balance(i.warehouseId, i.sku, i.locationId);
+    if (current + i.delta < 0) {
       return err(new Error("insufficient stock: balance cannot go negative"));
+    }
 
     const movement = createMovement({
+      warehouseId: i.warehouseId,
       sku: i.sku,
       locationId: i.locationId,
       quantityDelta: i.delta,

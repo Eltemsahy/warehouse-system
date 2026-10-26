@@ -19,7 +19,8 @@ export function createInventoryModule(
   return {
     router: inventoryRoutes({ adjust, transfer, ledger }),
     // Public query used by other modules (e.g. outbound allocation)
-    getBalance: (sku: string, locationId: string) => ledger.balance(sku, locationId),
+    getBalance: (warehouseId: string, sku: string, locationId: string) =>
+      ledger.balance(warehouseId, sku, locationId),
     adjust,
     transfer,
     // Only when an auditor is supplied: the in-memory ledger has nothing to compare against.

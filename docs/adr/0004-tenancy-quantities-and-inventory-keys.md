@@ -15,8 +15,8 @@
      - **Validated on write** through the catalog and locations public interfaces (P1-5): an adjustment or transfer for an unknown or inactive SKU, location or warehouse is rejected. History for retired codes stays valid.
      - **Transfers stay inside one warehouse for now.** Moving stock between warehouses needs an in-transit step and is a separate feature.
 - **Alternatives considered for 3:**
-  - *Organisation-wide location codes* (the first draft). The simplest keys, but it pushes a naming convention onto users and conflicts with the Schema doc. Rejected.
-  - *UUID location keys with code lookups.* Renames become free and the key is unambiguous, but the ledger becomes opaque to people, the ERP and audits, every read needs a lookup in another module, and scanners must resolve a barcode to an id before each operation. It stays a valid later move if immutable codes prove too restrictive.
+  - _Organisation-wide location codes_ (the first draft). The simplest keys, but it pushes a naming convention onto users and conflicts with the Schema doc. Rejected.
+  - _UUID location keys with code lookups._ Renames become free and the key is unambiguous, but the ledger becomes opaque to people, the ERP and audits, every read needs a lookup in another module, and scanners must resolve a barcode to an id before each operation. It stays a valid later move if immutable codes prove too restrictive.
 - **Consequences:**
   - The Schema doc needs three edits: the `stock_levels` key and the `stock_movements` index gain `warehouse_id` first, and section 14 items 1 to 3 are closed. The location uniqueness rule stays as written.
   - Inventory was refactored to match (P1-7b): migration 005 adds `warehouse_id` to both tables (existing development rows get the placeholder warehouse `00000000-0000-0000-0000-000000000001`, then the default is dropped); `StockMovement`, the `StockLedger` port, both use cases, the routes, the event payloads, the ledger integrity check (grouped by warehouse), the contract tests and the README carry the warehouse. The API paths changed, which is safe because nothing outside the repository calls them yet.

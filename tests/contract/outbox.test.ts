@@ -47,6 +47,7 @@ describe("OutboxRelay", () => {
   });
   const deposit = () =>
     createMovement({
+      warehouseId: randomUUID(),
       sku: `SKU-${randomUUID()}`,
       locationId: "A-01",
       quantityDelta: 1,

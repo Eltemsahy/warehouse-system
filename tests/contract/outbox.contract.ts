@@ -31,8 +31,8 @@ const probe = (): DomainEvent => ({
   payload: { probe: true },
 });
 
-const deposit = (sku = `SKU-${randomUUID()}`) =>
-  createMovement({ sku, locationId: "A-01", quantityDelta: 1, type: "ADJUSTMENT" });
+const deposit = (sku = `SKU-${randomUUID()}`, warehouseId = randomUUID()) =>
+  createMovement({ warehouseId, sku, locationId: "A-01", quantityDelta: 1, type: "ADJUSTMENT" });
 
 /**
  * Dispatches until none of `ids` is pending any more. Other events may be in the outbox
@@ -67,16 +67,18 @@ export function outboxContract(
     it("stores events together with the movements", async () => {
       const { ledger, outbox } = factory();
       const sku = `SKU-${randomUUID()}`;
+      const warehouseId = randomUUID();
       const event = probe();
-      await ledger.append([deposit(sku)], [event]);
+      await ledger.append([deposit(sku, warehouseId)], [event]);
       expect(await outbox.status(event.id)).toBe("pending");
-      expect(await ledger.balance(sku, "A-01")).toBe(1);
+      expect(await ledger.balance(warehouseId, sku, "A-01")).toBe(1);
     });
 
     it("stores no event when the append is rejected", async () => {
       const { ledger, outbox } = factory();
       const event = probe();
       const overdraw = createMovement({
+        warehouseId: randomUUID(),
         sku: `SKU-${randomUUID()}`,
         locationId: "A-01",
         quantityDelta: -1,

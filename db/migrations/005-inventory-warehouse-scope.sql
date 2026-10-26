@@ -17,3 +17,4 @@ ALTER TABLE inventory.stock_levels ADD PRIMARY KEY (warehouse_id, sku, location_
 DROP INDEX inventory.stock_movements_sku_loc_idx;
 CREATE INDEX stock_movements_wh_sku_loc_idx
   ON inventory.stock_movements (warehouse_id, sku, location_id);
+  

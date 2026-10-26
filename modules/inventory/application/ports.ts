@@ -8,11 +8,13 @@ export interface StockLedger {
    * later by the outbox relay, so a crash after commit never loses them (TRD s5.4).
    */
   append(movements: StockMovement[], events?: readonly DomainEvent[]): Promise<void>;
-  balance(sku: string, locationId: string): Promise<number>;
+  /** Balance of one SKU at one location of one warehouse (ADR 0004). */
+  balance(warehouseId: string, sku: string, locationId: string): Promise<number>;
 }
 
-/** A (sku, location) whose cached balance no longer matches the ledger (ADR 0002). */
+/** A (warehouse, sku, location) whose cached balance no longer matches the ledger (ADR 0002). */
 export interface LedgerDiscrepancy {
+  warehouseId: string;
   sku: string;
   locationId: string;
   /** sum(quantity_delta) over the ledger: the source of truth. */
@@ -23,6 +25,6 @@ export interface LedgerDiscrepancy {
 
 /** Read-only comparison of the ledger with the cached balances. */
 export interface LedgerAuditor {
-  /** Returns up to `limit` pairs whose ledger sum differs from the cached balance. */
+  /** Returns up to `limit` keys whose ledger sum differs from the cached balance. */
   findDiscrepancies(limit: number): Promise<LedgerDiscrepancy[]>;
 }

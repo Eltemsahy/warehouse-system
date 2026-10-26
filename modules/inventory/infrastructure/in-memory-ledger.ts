@@ -4,7 +4,8 @@ import type { StockLedger } from "../application/ports.js";
 import { InsufficientStockError } from "../domain/errors.js";
 import type { StockMovement } from "../domain/stock-movement.js";
 
-const key = (sku: string, locationId: string) => `${sku}\u0000${locationId}`;
+const key = (warehouseId: string, sku: string, locationId: string) =>
+  `${warehouseId}\u0000${sku}\u0000${locationId}`;
 
 /** For tests and local dev. Honours the same contract as PgStockLedger. */
 export class InMemoryLedger implements StockLedger {
@@ -19,7 +20,7 @@ export class InMemoryLedger implements StockLedger {
     // mirroring the Postgres transaction. Events are stored only if every movement passes.
     const next = new Map<string, number>();
     for (const m of movements) {
-      const k = key(m.sku, m.locationId);
+      const k = key(m.warehouseId, m.sku, m.locationId);
       const updated = (next.get(k) ?? this.levels.get(k) ?? 0) + m.quantityDelta;
       if (updated < 0) throw new InsufficientStockError();
       next.set(k, updated);
@@ -28,7 +29,7 @@ export class InMemoryLedger implements StockLedger {
     this.outbox.add(events);
   }
 
-  async balance(sku: string, locationId: string) {
-    return this.levels.get(key(sku, locationId)) ?? 0;
+  async balance(warehouseId: string, sku: string, locationId: string) {
+    return this.levels.get(key(warehouseId, sku, locationId)) ?? 0;
   }
 }
