@@ -25,7 +25,7 @@ A modular monolith for warehouse and logistics operations, built with TypeScript
 
 What exists today:
 
-- **Inventory:** stock adjustments, transfers and balances on an append-only movement ledger (see `docs/adr/0002-inventory-ledger.md`).
+- **Inventory:** stock adjustments, transfers and balances, per warehouse, on an append-only movement ledger (see `docs/adr/0002-inventory-ledger.md` and `docs/adr/0004-tenancy-quantities-and-inventory-keys.md`).
 - **Reliable events:** a transactional outbox delivers `inventory.StockAdjusted` and `inventory.StockTransferred` after commit, with retries and a dead-letter store.
 - **Safe retries:** mutating requests accept an `Idempotency-Key`, so a retried request never writes twice.
 - **Operations:** liveness and readiness endpoints, graceful shutdown, a nightly ledger integrity check, and a production Docker image that migrates before it serves.
@@ -163,35 +163,41 @@ Or work inside the folder directly: `cd apps/web-admin`, then `npm install` and 
 
 ## API
 
-| Method | Path                                            | Purpose                                                                                 |
-| ------ | ----------------------------------------------- | --------------------------------------------------------------------------------------- |
-| `POST` | `/inventory/adjustments`                        | Add or remove stock at a location                                                       |
-| `POST` | `/inventory/transfers`                          | Move stock between two locations                                                        |
-| `GET`  | `/inventory/:sku/locations/:locationId/balance` | Current balance at a location                                                           |
-| `GET`  | `/health`                                       | Liveness: the process is up                                                             |
-| `GET`  | `/health/ready`                                 | Readiness: `200` when the database is reachable, `503` otherwise or while shutting down |
+| Method | Path                                                                         | Purpose                                                                                 |
+| ------ | ---------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| `POST` | `/inventory/warehouses/:warehouseId/adjustments`                             | Add or remove stock at a location                                                       |
+| `POST` | `/inventory/warehouses/:warehouseId/transfers`                               | Move stock between two locations of the warehouse                                       |
+| `GET`  | `/inventory/warehouses/:warehouseId/skus/:sku/locations/:locationId/balance` | Current balance at a location                                                           |
+| `GET`  | `/health`                                                                    | Liveness: the process is up                                                             |
+| `GET`  | `/health/ready`                                                              | Readiness: `200` when the database is reachable, `503` otherwise or while shutting down |
 
-Request bodies are JSON. Example requests (bash, then PowerShell):
+Inventory is scoped to a warehouse through the path (see `docs/adr/0004-tenancy-quantities-and-inventory-keys.md`). `warehouseId` is a UUID. A location code is unique within its warehouse, so two warehouses can both have an `A-01` and their stock stays separate. SKUs and location codes are exact-match, case-sensitive text of 1 to 64 characters: letters, digits, `.`, `_`, `/` and `-`. A transfer stays inside one warehouse.
+
+Request bodies are JSON. The examples use `00000000-0000-0000-0000-000000000001`, the placeholder warehouse that migration 005 gave to any existing development data. Example requests (bash, then PowerShell):
 
 ```bash
-curl -X POST localhost:3000/inventory/adjustments -H 'content-type: application/json' \
+WH=00000000-0000-0000-0000-000000000001
+
+curl -X POST localhost:3000/inventory/warehouses/$WH/adjustments -H 'content-type: application/json' \
   -d '{"sku":"SKU-1","locationId":"A-01","delta":10,"reason":"initial count"}'
 
-curl -X POST localhost:3000/inventory/transfers -H 'content-type: application/json' \
+curl -X POST localhost:3000/inventory/warehouses/$WH/transfers -H 'content-type: application/json' \
   -d '{"sku":"SKU-1","from":"A-01","to":"B-02","quantity":4}'
 
-curl localhost:3000/inventory/SKU-1/locations/A-01/balance
+curl localhost:3000/inventory/warehouses/$WH/skus/SKU-1/locations/A-01/balance
 ```
 
 ```powershell
+$wh = "00000000-0000-0000-0000-000000000001"
+
 $body = @{ sku="SKU-1"; locationId="A-01"; delta=10; reason="initial count" } | ConvertTo-Json
-Invoke-RestMethod -Method Post http://localhost:3000/inventory/adjustments -ContentType "application/json" -Body $body
+Invoke-RestMethod -Method Post http://localhost:3000/inventory/warehouses/$wh/adjustments -ContentType "application/json" -Body $body
 
 $t = @{ sku="SKU-1"; from="A-01"; to="B-02"; quantity=4 } | ConvertTo-Json
-Invoke-RestMethod -Method Post http://localhost:3000/inventory/transfers -ContentType "application/json" -Body $t
+Invoke-RestMethod -Method Post http://localhost:3000/inventory/warehouses/$wh/transfers -ContentType "application/json" -Body $t
 
-Invoke-RestMethod http://localhost:3000/inventory/SKU-1/locations/A-01/balance   # expect 6
-Invoke-RestMethod http://localhost:3000/inventory/SKU-1/locations/B-02/balance   # expect 4
+Invoke-RestMethod http://localhost:3000/inventory/warehouses/$wh/skus/SKU-1/locations/A-01/balance   # expect 6
+Invoke-RestMethod http://localhost:3000/inventory/warehouses/$wh/skus/SKU-1/locations/B-02/balance   # expect 4
 ```
 
 An overdraw (for example `delta=-100`) returns `422` with an insufficient-stock error. PowerShell throws on any 4xx response, so that failure is the expected result.
@@ -211,7 +217,7 @@ Send an `Idempotency-Key` header (1 to 255 printable characters, for example a U
 Keys are remembered for 24 hours. Successful responses and 4xx rejections are stored and replayed; a `5xx` is not, so the client can retry. A replay returns the stored status and JSON body.
 
 ```bash
-curl -X POST localhost:3000/inventory/adjustments -H 'content-type: application/json' \
+curl -X POST localhost:3000/inventory/warehouses/$WH/adjustments -H 'content-type: application/json' \
   -H 'Idempotency-Key: demo-1' \
   -d '{"sku":"SKU-9","locationId":"A-01","delta":5,"reason":"idempotency demo"}'
 # send it again: same response, Idempotent-Replayed: true, balance stays 5
@@ -223,7 +229,7 @@ Errors are JSON of the form `{"error": "message"}`. A `400` caused by an invalid
 
 | Status | Meaning                                                                                                                          |
 | ------ | -------------------------------------------------------------------------------------------------------------------------------- |
-| `400`  | Invalid request body, or an invalid `Idempotency-Key`                                                                            |
+| `400`  | Invalid request body or path parameter (for example a `warehouseId` that is not a UUID), or an invalid `Idempotency-Key`         |
 | `404`  | Unknown route                                                                                                                    |
 | `409`  | The same `Idempotency-Key` is still being processed; retry shortly                                                               |
 | `422`  | A business rule refused the request (for example insufficient stock), or an `Idempotency-Key` was reused for a different request |
@@ -234,7 +240,7 @@ Errors are JSON of the form `{"error": "message"}`. A `400` caused by an invalid
 
 **Modular monolith.** One deployable and one database, with one Postgres schema per module (see `docs/adr/0001-modular-monolith.md`). Inside a module the layers are `api` to `application` to `domain`, with `infrastructure` implementing the domain's ports. Modules talk to each other only through their public `index.ts` or through domain events, and `npm run lint:deps` fails the build if that is broken. Only `apps/api/src/app.ts` wires modules together.
 
-**Inventory ledger.** Every stock change is a row in `inventory.stock_movements`, which is never updated or deleted. Balances are cached in `inventory.stock_levels` and updated in the same transaction. A database constraint keeps balances from going negative, even under concurrent requests. A correction is a new movement, never an edit.
+**Inventory ledger.** Every stock change is a row in `inventory.stock_movements`, which is never updated or deleted. Balances are cached in `inventory.stock_levels` and updated in the same transaction. Every key starts with the warehouse: a balance belongs to one `(warehouse, sku, location)`. A database constraint keeps balances from going negative, even under concurrent requests. A correction is a new movement, never an edit.
 
 **Events and the outbox.** A use case hands its events to the ledger, which stores them in `platform.outbox` in the same transaction as the stock change. A relay then delivers them to subscribers. Delivery is at least once, so subscribers must be idempotent. A failed delivery is retried with growing delays, and after 8 failures the event moves to `platform.outbox_dead_letter`.
 
@@ -479,6 +485,6 @@ git push
 
 ## Further reading
 
-- `docs/adr/`: architecture decisions (modular monolith, inventory ledger, independent frontend packages)
+- `docs/adr/`: architecture decisions (modular monolith, inventory ledger, independent frontend packages, tenancy and inventory keys)
 - `docs/domain/glossary.md`: warehouse terms used in the code
 - `BACKEND_NOTES.txt`: build status against the implementation plan, conventions and known limits

@@ -20,9 +20,10 @@ against them. If something here disagrees with a plan, fix one of them.
 - Single organisation, no multi-tenancy (no tenant_id). Users manage their own
   warehouse(s). Warehouse scoping still applies (warehouse_id on operational tables).
 - Quantities are integers in the item's base UoM. Revisit only if needed.
-- Inventory keeps text sku / location_id (business codes) and adds the warehouse to every key:
-  PROPOSED in ADR 0004, pending the owner's confirmation. Location codes stay unique per
-  warehouse; codes are immutable within their scope.
+- Inventory keeps text sku / location_id (business codes) and the warehouse leads every
+  inventory key (ADR 0004, Accepted). Location codes are unique per warehouse; SKUs are
+  organisation-wide; codes are immutable within their scope; transfers stay inside one
+  warehouse.
 - ERP / carrier / e-commerce vendors: not decided. Ports stay owned by the
   consuming module.
 
@@ -256,8 +257,9 @@ becomes (id, occurred_at); this is hard to change later.
 
 13. PHASE 1 STATUS AND FINDINGS
 -------------------------------
-  P1-7  ADR tenancy / quantities / keys ... DRAFTED: docs/adr/0004-*.md (Proposed). Becomes
-                               Accepted once the location-code decision below is confirmed.
+  P1-7  ADR tenancy / quantities / keys ... DONE: docs/adr/0004-*.md (Accepted).
+  P1-7b Inventory keyed by warehouse ....... DONE once `npm run migrate` and `npm test` are
+                               green (migration 005 + refactor, see section 14).
   P1-1 identity, P1-2 audit, P1-3 locations, P1-4 catalog, P1-5 inventory validation,
   P1-6 seed data ... TODO.
 - G13 (NEW, found while writing ADR 0004, not in the TRD gap list): the Schema doc makes
@@ -265,9 +267,34 @@ becomes (id, occurred_at); this is hard to change later.
   stock_levels on (sku, location_id) with the code alone. Two warehouses that both have a
   location "A-01" would share one balance. A first draft made location codes organisation-wide
   unique; the owner rejected that (it forces a naming convention onto users and contradicts
-  the Schema doc). ADR 0004 now proposes adding warehouse_id first in every inventory key.
+  the Schema doc). ADR 0004 adds warehouse_id first in every inventory key instead.
 - Edits the Schema doc needs once ADR 0004 is accepted: stock_levels key and stock_movements
   index gain warehouse_id first; section 14 items 1 to 3 are closed.
-- P1-7b (new, follows the ADR): inventory keyed by warehouse. Migration 005 + refactor of
-  StockMovement, the StockLedger port, use cases, routes, event payloads, integrity check,
-  contract tests and README. TODO after the ADR is accepted.
+- G13 is closed by P1-7b (section 14).
+
+14. INVENTORY KEYED BY WAREHOUSE (P1-7b, ADR 0004, closes G13)
+--------------------------------------------------------------
+- Migration 005: warehouse_id uuid NOT NULL on inventory.stock_movements and
+  inventory.stock_levels; stock_levels primary key is now (warehouse_id, sku, location_id);
+  the movements index is (warehouse_id, sku, location_id). Existing development rows were
+  given the placeholder warehouse 00000000-0000-0000-0000-000000000001 (the P1-6 demo seed
+  should reuse that id), then the column default was dropped.
+- Code: StockMovement.warehouseId; StockLedger.balance(warehouseId, sku, locationId);
+  AdjustStockInput and TransferStockInput carry warehouseId; the StockTransferred payload
+  carries it (StockAdjusted already carries the whole movement); the ledgers lock rows in
+  (warehouse, sku, location) order; the integrity check groups by warehouse.
+- API (path-scoped, so a future middleware can authorise /warehouses/:warehouseId/*):
+    POST /inventory/warehouses/:warehouseId/adjustments
+    POST /inventory/warehouses/:warehouseId/transfers
+    GET  /inventory/warehouses/:warehouseId/skus/:sku/locations/:locationId/balance
+  warehouseId must be a UUID. sku and location codes: 1 to 64 characters from letters,
+  digits, . _ / - (ADR 0004). The old /inventory/adjustments style paths are gone.
+- Tests: the stock-ledger contract and the inventory e2e tests have regression cases for two
+  warehouses sharing a location code (checked by temporarily making the in-memory key ignore
+  the warehouse: three tests fail). The Postgres auditor tests include "flags only the
+  warehouse whose balance drifted".
+- Still to do (later migrations): length and charset CHECK constraints on the code columns;
+  P1-3 and P1-4 enforce per-warehouse location and organisation-wide SKU uniqueness
+  (case-insensitive) and expose the lookups that P1-5 validates against.
+- Schema doc edits outstanding: stock_levels key and stock_movements index gain warehouse_id
+  first; section 14 items 1 to 3 closed.
