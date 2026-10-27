@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "prepare": "husky",
     "dev": "tsx watch apps/api/src/main.ts",
     "build": "tsc -p tsconfig.build.json && node scripts/copy-migrations.mjs",
     "start": "node dist/apps/api/src/main.js",
@@ -19,7 +20,11 @@
     "check:ledger": "tsx db/check-ledger.ts",
     "lint": "eslint .",
     "format": "prettier --write .",
+    "format:staged": "lint-staged",
     "format:check": "prettier --check ."
+  },
+  "lint-staged": {
+    "*.{cjs,css,html,js,json,md,mjs,svg,ts,tsx,yml}": "prettier --write"
   },
   "dependencies": {
     "dotenv": "^18.0.7",
@@ -35,6 +40,8 @@
     "dependency-cruiser": "^16.3.0",
     "eslint": "^10.11.0",
     "eslint-config-prettier": "^10.1.8",
+    "husky": "^9.1.7",
+    "lint-staged": "^15.5.2",
     "prettier": "^3.9.9",
     "tsx": "^4.16.0",
     "typescript": "^5.5.0",

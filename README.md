@@ -338,7 +338,7 @@ CI (`.github/workflows/ci.yml`) runs four jobs in parallel, and any failure fail
 
 ## Code quality
 
-- **Prettier** sets the style (`.prettierrc`: double quotes, semicolons, trailing commas, 100 columns). Run `npm run format` before you commit; CI runs `npm run format:check`.
+- **Prettier** sets the style (`.prettierrc`: double quotes, semicolons, trailing commas, 100 columns). A pre-commit hook formats staged files automatically; run `npm run format` to format the whole repository. CI runs `npm run format:check`.
 - **ESLint** (`npm run lint`) catches likely bugs and enforces `import type` for type-only imports.
 - **dependency-cruiser** (`npm run lint:deps`) enforces the module boundaries and layering.
 - **TypeScript** runs in strict mode (`npm run typecheck`).
@@ -487,4 +487,4 @@ git push
 
 - `docs/adr/`: architecture decisions (modular monolith, inventory ledger, independent frontend packages, tenancy and inventory keys)
 - `docs/domain/glossary.md`: warehouse terms used in the code
-- `BACKEND_NOTES.txt`: build status against the implementation plan, conventions and known limits
+- `BACKEND_NOTES.txt`: build status against the implementation plan, conventions and known limits`
