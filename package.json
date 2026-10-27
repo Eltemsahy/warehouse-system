@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "prepare": "node scripts/prepare-husky.mjs",
+    "prepare": "node --input-type=module -e \"if (process.env.NODE_ENV !== 'production') { const { default: husky } = await import('husky'); husky(); }\"",
     "dev": "tsx watch apps/api/src/main.ts",
     "build": "tsc -p tsconfig.build.json && node scripts/copy-migrations.mjs",
     "start": "node dist/apps/api/src/main.js",
