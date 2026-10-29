@@ -18,6 +18,11 @@ import {
   PgLedgerAuditor,
   PgStockLedger,
 } from "../../../modules/inventory/index.js";
+import {
+  createLocationsModule,
+  InMemoryLocationsRepository,
+  PgLocationsRepository,
+} from "../../../modules/locations/index.js";
 import { config } from "./config.js";
 import { pool } from "./db.js";
 import {
@@ -37,6 +42,7 @@ function createPersistence() {
       auditor: new PgLedgerAuditor(pool),
       dispatcher: new PgOutbox(pool),
       idempotencyStore: new PgIdempotencyStore(pool),
+      locationsRepository: new PgLocationsRepository(pool),
       readiness,
     };
   }
@@ -47,6 +53,7 @@ function createPersistence() {
     auditor: undefined, // the in-memory ledger keeps no separate cache to audit
     dispatcher: outbox,
     idempotencyStore: new InMemoryIdempotencyStore(),
+    locationsRepository: new InMemoryLocationsRepository(),
     readiness,
   };
 }
@@ -57,7 +64,8 @@ export function buildApp() {
   const lifecycle = { shuttingDown: false };
   const isShuttingDown = () => lifecycle.shuttingDown;
 
-  const { ledger, auditor, dispatcher, idempotencyStore, readiness } = createPersistence();
+  const { ledger, auditor, dispatcher, idempotencyStore, locationsRepository, readiness } =
+    createPersistence();
 
   // Probes first: cheap, unauthenticated, and unaffected by the middleware below.
   app.use(connectionCloseWhenShuttingDown(isShuttingDown));
@@ -74,6 +82,9 @@ export function buildApp() {
 
   const inventory = createInventoryModule({ ledger, auditor });
   app.use("/inventory", inventory.router);
+
+  const locations = createLocationsModule({ repository: locationsRepository });
+  app.use("/locations", locations.router);
 
   // Subscribers only ever see committed events, delivered at least once, and a failing
   // subscriber is retried by the relay instead of failing the HTTP request (TRD G2, G3).

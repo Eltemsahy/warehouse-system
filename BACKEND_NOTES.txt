@@ -260,8 +260,9 @@ becomes (id, occurred_at); this is hard to change later.
   P1-7  ADR tenancy / quantities / keys ... DONE: docs/adr/0004-*.md (Accepted).
   P1-7b Inventory keyed by warehouse ....... DONE once `npm run migrate` and `npm test` are
                                green (migration 005 + refactor, see section 14).
-  P1-1 identity, P1-2 audit, P1-3 locations, P1-4 catalog, P1-5 inventory validation,
-  P1-6 seed data ... TODO.
+  P1-3  Locations ......................... DONE once `npm run migrate` and `npm test` are green
+                               (migration 006, section 15).
+  P1-1 identity, P1-2 audit, P1-4 catalog, P1-5 inventory validation, P1-6 seed data ... TODO.
 - G13 (NEW, found while writing ADR 0004, not in the TRD gap list): the Schema doc makes
   location.code unique per warehouse, UNIQUE(warehouse_id, code), but inventory keys
   stock_levels on (sku, location_id) with the code alone. Two warehouses that both have a
@@ -298,3 +299,29 @@ becomes (id, occurred_at); this is hard to change later.
   (case-insensitive) and expose the lookups that P1-5 validates against.
 - Schema doc edits outstanding: stock_levels key and stock_movements index gain warehouse_id
   first; section 14 items 1 to 3 closed.
+
+15. LOCATIONS MODULE (P1-3, ADR 0004)
+-------------------------------------
+- Tables (schema `locations`, migration 006): warehouse, zone, location_type, storage_class,
+  location, location_capacity, location_storage_class. Reference rows are seeded: types BIN,
+  PALLET, FLOOR, STAGING; classes AMBIENT, COLD, FROZEN, HAZMAT.
+- ADR 0004 rules live in the database: codes match ^[A-Za-z0-9._/-]{1,64}$; warehouse, type and
+  class codes are unique organisation-wide, zone and location codes per warehouse, all
+  ignoring case; triggers forbid changing a code or moving a zone/location to another
+  warehouse; a composite foreign key makes a location's zone belong to the same warehouse.
+- Every mutable row has the audit columns (created_by/updated_by stay null until identity,
+  P1-1/P1-2) and an optimistic-lock `version`: PATCH must send it; a stale one gives 409.
+- Public interface (modules/locations/index.ts): getWarehouse(id), getLocation(warehouseId,
+  code) (exact match), exists(warehouseId, code) (exists AND active AND warehouse active).
+- HTTP: see the README. Warehouse-scoped paths so one middleware can authorise them later.
+- Choices beyond the Schema doc (confirm or adjust): location_type and storage_class are
+  organisation-wide; warehouse.status ACTIVE/INACTIVE; location.status AVAILABLE/BLOCKED
+  (operational) plus is_active (retired); zone types RECEIVING, STORAGE, PICKING, PACKING,
+  SHIPPING, QUARANTINE; capacity weight/volume are numeric(12,3). Not built yet: slotting
+  rules and dock doors (later phases).
+- For P1-5 (inventory validation): a retired (inactive) location must still allow stock to be
+  moved OUT of it, otherwise its remaining stock gets stuck. Reject new stock INTO inactive
+  or unknown locations, and refuse retiring a location that still holds stock once inventory
+  can be asked (open design point).
+- Tests: tests/contract/locations-repository.* (both adapters), tests/e2e/locations*.test.ts,
+  tests/e2e/locations-schema.pg.test.ts (checks the constraints and triggers in Postgres).

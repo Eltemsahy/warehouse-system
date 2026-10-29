@@ -26,6 +26,7 @@ A modular monolith for warehouse and logistics operations, built with TypeScript
 What exists today:
 
 - **Inventory:** stock adjustments, transfers and balances, per warehouse, on an append-only movement ledger (see `docs/adr/0002-inventory-ledger.md` and `docs/adr/0004-tenancy-quantities-and-inventory-keys.md`).
+- **Locations:** warehouses, zones and locations, with location types, capacity and storage classes. Codes are unique per warehouse and never change (see `docs/adr/0004-tenancy-quantities-and-inventory-keys.md`).
 - **Reliable events:** a transactional outbox delivers `inventory.StockAdjusted` and `inventory.StockTransferred` after commit, with retries and a dead-letter store.
 - **Safe retries:** mutating requests accept an `Idempotency-Key`, so a retried request never writes twice.
 - **Operations:** liveness and readiness endpoints, graceful shutdown, a nightly ledger integrity check, and a production Docker image that migrates before it serves.
@@ -34,7 +35,7 @@ What exists today:
 What does not exist yet:
 
 - **Authentication and authorisation.** Every route is open, so do not expose the API publicly yet.
-- **The other modules.** `catalog`, `identity`, `inbound`, `locations`, `outbound` and `shipping` are empty scaffolds, as is `integrations/`.
+- **The other modules.** `catalog`, `identity`, `inbound`, `outbound` and `shipping` are empty scaffolds, as is `integrations/`.
 - **A finished frontend.** `apps/web-admin` is in early development. It is linted and built by its own CI job, but it is not covered by the root Prettier setup. `apps/mobile-scanner` is a placeholder.
 
 For the build status against the implementation plan, and the design decisions behind it, see `BACKEND_NOTES.txt`.
@@ -202,6 +203,29 @@ Invoke-RestMethod http://localhost:3000/inventory/warehouses/$wh/skus/SKU-1/loca
 
 An overdraw (for example `delta=-100`) returns `422` with an insufficient-stock error. PowerShell throws on any 4xx response, so that failure is the expected result.
 
+### Locations
+
+| Method         | Path                                                 | Purpose                                         |
+| -------------- | ---------------------------------------------------- | ----------------------------------------------- |
+| `POST`, `GET`  | `/locations/warehouses`                              | Create a warehouse; list warehouses             |
+| `GET`, `PATCH` | `/locations/warehouses/:warehouseId`                 | Read or update a warehouse                      |
+| `POST`, `GET`  | `/locations/warehouses/:warehouseId/zones`           | Create a zone; list the warehouse's zones       |
+| `PATCH`        | `/locations/warehouses/:warehouseId/zones/:zoneId`   | Update a zone                                   |
+| `POST`, `GET`  | `/locations/warehouses/:warehouseId/locations`       | Create a location; list with filters and paging |
+| `GET`, `PATCH` | `/locations/warehouses/:warehouseId/locations/:code` | Read or update a location by its code           |
+| `GET`, `POST`  | `/locations/location-types`                          | List or add location types (organisation-wide)  |
+| `GET`, `POST`  | `/locations/storage-classes`                         | List or add storage classes (organisation-wide) |
+
+Updates (`PATCH`) must send the `version` you last read. If someone changed the record meanwhile you get `409` and should re-read. Codes (and a location's warehouse) can never be changed: a body that contains them is rejected with `400`. Retire a record with `"isActive": false` (or a warehouse with `"status": "INACTIVE"`) instead of deleting it. Locations list in code order; pass the returned `nextAfter` as `after` for the next page (`limit` 1 to 200, default 50), and filter with `zoneId`, `type`, `status` and `active`.
+
+```bash
+curl -X POST localhost:3000/locations/warehouses -H 'content-type: application/json' \
+  -d '{"code":"CAI-1","name":"Cairo DC","timezone":"Africa/Cairo"}'
+# use the returned id as :warehouseId
+curl -X POST localhost:3000/locations/warehouses/<id>/locations -H 'content-type: application/json' \
+  -d '{"code":"A-01-02","type":"BIN","storageClasses":["AMBIENT"]}'
+```
+
 ### Idempotency keys
 
 Send an `Idempotency-Key` header (1 to 255 printable characters, for example a UUID) on any `POST`, `PUT`, `PATCH` or `DELETE` so the request can be retried safely, for instance after a lost response on a flaky connection.
@@ -231,7 +255,7 @@ Errors are JSON of the form `{"error": "message"}`. A `400` caused by an invalid
 | ------ | -------------------------------------------------------------------------------------------------------------------------------- |
 | `400`  | Invalid request body or path parameter (for example a `warehouseId` that is not a UUID), or an invalid `Idempotency-Key`         |
 | `404`  | Unknown route                                                                                                                    |
-| `409`  | The same `Idempotency-Key` is still being processed; retry shortly                                                               |
+| `409`  | The same `Idempotency-Key` is still being processed (retry shortly), a code already exists, or a `PATCH` used a stale `version`  |
 | `422`  | A business rule refused the request (for example insufficient stock), or an `Idempotency-Key` was reused for a different request |
 | `500`  | Unexpected error; the details are in the server log, never in the response                                                       |
 | `503`  | `/health/ready` only: not ready, or shutting down                                                                                |
@@ -257,7 +281,8 @@ apps/
   mobile-scanner/  placeholder for the handheld/PWA picker app
 modules/           one folder per domain module
   inventory/       implemented
-  catalog/ identity/ inbound/ locations/ outbound/ shipping/   empty scaffolds
+  locations/       implemented (warehouses, zones, locations)
+  catalog/ identity/ inbound/ outbound/ shipping/   empty scaffolds
 shared/
   kernel/          Result, ids, DomainEvent
   events/          in-process event bus, transactional outbox and relay
@@ -338,7 +363,7 @@ CI (`.github/workflows/ci.yml`) runs four jobs in parallel, and any failure fail
 
 ## Code quality
 
-- **Prettier** sets the style (`.prettierrc`: double quotes, semicolons, trailing commas, 100 columns). A pre-commit hook formats staged files automatically; run `npm run format` to format the whole repository. CI runs `npm run format:check`.
+- **Prettier** sets the style (`.prettierrc`: double quotes, semicolons, trailing commas, 100 columns). Run `npm run format` before you commit; CI runs `npm run format:check`.
 - **ESLint** (`npm run lint`) catches likely bugs and enforces `import type` for type-only imports.
 - **dependency-cruiser** (`npm run lint:deps`) enforces the module boundaries and layering.
 - **TypeScript** runs in strict mode (`npm run typecheck`).
@@ -487,4 +512,4 @@ git push
 
 - `docs/adr/`: architecture decisions (modular monolith, inventory ledger, independent frontend packages, tenancy and inventory keys)
 - `docs/domain/glossary.md`: warehouse terms used in the code
-- `BACKEND_NOTES.txt`: build status against the implementation plan, conventions and known limits`
+- `BACKEND_NOTES.txt`: build status against the implementation plan, conventions and known limits
