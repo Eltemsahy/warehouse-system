@@ -262,7 +262,14 @@ becomes (id, occurred_at); this is hard to change later.
                                green (migration 005 + refactor, see section 14).
   P1-3  Locations ......................... DONE once `npm run migrate` and `npm test` are green
                                (migration 006, section 15).
-  P1-1 identity, P1-2 audit, P1-4 catalog, P1-5 inventory validation, P1-6 seed data ... TODO.
+  P1-4  Catalog, in steps:
+        1 items, units, categories: schema + repositories ... DONE once migrate/tests are green
+          (migration 007, section 16)
+        2 barcodes (schema, repository, resolve lookup) ... TODO
+        3 services, API, public queries (getItem, exists, resolveBarcode) ... TODO
+        4 suppliers ... TODO
+        5 customers and addresses ... TODO
+  P1-1 identity, P1-2 audit, P1-5 inventory validation, P1-6 seed data ... TODO.
 - G13 (NEW, found while writing ADR 0004, not in the TRD gap list): the Schema doc makes
   location.code unique per warehouse, UNIQUE(warehouse_id, code), but inventory keys
   stock_levels on (sku, location_id) with the code alone. Two warehouses that both have a
@@ -325,3 +332,21 @@ becomes (id, occurred_at); this is hard to change later.
   can be asked (open design point).
 - Tests: tests/contract/locations-repository.* (both adapters), tests/e2e/locations*.test.ts,
   tests/e2e/locations-schema.pg.test.ts (checks the constraints and triggers in Postgres).
+
+16. CATALOG STEP 1 (P1-4, ADR 0004)
+-----------------------------------
+- Schema `catalog` (migration 007): uom, item_category, item, item_uom. Seeded units: EA, CS, PL.
+- SKU: organisation-wide, unique ignoring case, format ^[A-Za-z0-9._/-]{1,64}$, immutable. An
+  item's base unit is immutable too (every stock quantity is a whole number of it). Triggers
+  enforce both, plus: unit and category codes immutable; an item unit never moves to another
+  item or unit. Categories form a tree whose parent is fixed at creation (no cycles possible).
+- An item is stored together with its units in one step (the caller includes the base unit,
+  quantity 1); the rule "the base unit must be present" belongs to the service (step 3).
+- shelf_life_days is only allowed when has_expiry is true (CHECK). Quantities stay integers;
+  dimensions and weight are numeric(12,3), 0 or more.
+- Mutable rows carry audit columns and a `version` (updates must send the version they read).
+- Errors are this module's own NotFoundError, ConflictError, RuleViolationError (same shape as
+  locations; a shared kernel version is a possible later tidy-up).
+- Not built yet: tracking-flag changes once stock exists (inventory must be asked first),
+  uom_conversion, brands, attributes, hazmat, kits.
+- Tests: tests/contract/catalog-repository.* (both adapters), tests/e2e/catalog-schema.pg.test.ts.
