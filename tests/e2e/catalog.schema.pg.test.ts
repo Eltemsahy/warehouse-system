@@ -70,13 +70,17 @@ describe.skipIf(!enabled)("catalog schema (postgres)", () => {
 
   it("refuses to change a SKU or a base unit", async () => {
     const id = await addItem();
-    const sku = pool.query("UPDATE catalog.item SET sku = 'CHANGED' WHERE id = $1", [id]);
-    const base = pool.query("UPDATE catalog.item SET base_uom_id = $2 WHERE id = $1", [
-      id,
-      await uomId("CS"),
-    ]);
-    expect(await sqlState(sku)).toBe(INTEGRITY_VIOLATION);
-    expect(await sqlState(base)).toBe(INTEGRITY_VIOLATION);
+    expect(
+      await sqlState(pool.query("UPDATE catalog.item SET sku = 'CHANGED' WHERE id = $1", [id])),
+    ).toBe(INTEGRITY_VIOLATION);
+    expect(
+      await sqlState(
+        pool.query("UPDATE catalog.item SET base_uom_id = $2 WHERE id = $1", [
+          id,
+          await uomId("CS"),
+        ]),
+      ),
+    ).toBe(INTEGRITY_VIOLATION);
   });
 
   it("refuses to change a unit or category code", async () => {
