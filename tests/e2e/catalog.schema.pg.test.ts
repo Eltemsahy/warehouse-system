@@ -110,10 +110,12 @@ describe.skipIf(!enabled)("catalog schema (postgres)", () => {
     ]);
     expect(await sqlState(move)).toBe(INTEGRITY_VIOLATION);
 
-    const zero = pool.query("UPDATE catalog.item_uom SET qty_in_base = 0 WHERE id = $1", [id]);
-    const negative = pool.query("UPDATE catalog.item_uom SET weight = -1 WHERE id = $1", [id]);
-    expect(await sqlState(zero)).toBe(CHECK_VIOLATION);
-    expect(await sqlState(negative)).toBe(CHECK_VIOLATION);
+    expect(
+      await sqlState(pool.query("UPDATE catalog.item_uom SET qty_in_base = 0 WHERE id = $1", [id])),
+    ).toBe(CHECK_VIOLATION);
+    expect(
+      await sqlState(pool.query("UPDATE catalog.item_uom SET weight = -1 WHERE id = $1", [id])),
+    ).toBe(CHECK_VIOLATION);
 
     const twice = pool.query(
       "INSERT INTO catalog.item_uom (id, item_id, uom_id, qty_in_base) VALUES ($1, $2, $3, 6)",

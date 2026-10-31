@@ -102,18 +102,22 @@ describe.skipIf(!enabled)("locations schema (postgres)", () => {
     const zone = await addZone(w);
     await addLocation(w, "A-01");
 
-    const location = pool.query(
-      "UPDATE locations.location SET code = 'A-02' WHERE code = 'A-01' AND warehouse_id = $1",
-      [w],
-    );
-    const zoneUpdate = pool.query("UPDATE locations.zone SET code = 'NEW' WHERE id = $1", [zone]);
-    const warehouseUpdate = pool.query(
-      "UPDATE locations.warehouse SET code = 'NEW-CODE' WHERE id = $1",
-      [w],
-    );
-    expect(await sqlState(location)).toBe(INTEGRITY_VIOLATION);
-    expect(await sqlState(zoneUpdate)).toBe(INTEGRITY_VIOLATION);
-    expect(await sqlState(warehouseUpdate)).toBe(INTEGRITY_VIOLATION);
+    expect(
+      await sqlState(
+        pool.query(
+          "UPDATE locations.location SET code = 'A-02' WHERE code = 'A-01' AND warehouse_id = $1",
+          [w],
+        ),
+      ),
+    ).toBe(INTEGRITY_VIOLATION);
+    expect(
+      await sqlState(pool.query("UPDATE locations.zone SET code = 'NEW' WHERE id = $1", [zone])),
+    ).toBe(INTEGRITY_VIOLATION);
+    expect(
+      await sqlState(
+        pool.query("UPDATE locations.warehouse SET code = 'NEW-CODE' WHERE id = $1", [w]),
+      ),
+    ).toBe(INTEGRITY_VIOLATION);
   });
 
   it("refuses to move a zone or a location to another warehouse", async () => {
@@ -121,16 +125,19 @@ describe.skipIf(!enabled)("locations schema (postgres)", () => {
     const zone = await addZone(w1);
     await addLocation(w1, "A-01");
 
-    const moveZone = pool.query("UPDATE locations.zone SET warehouse_id = $2 WHERE id = $1", [
-      zone,
-      w2,
-    ]);
-    const moveLocation = pool.query(
-      "UPDATE locations.location SET warehouse_id = $2 WHERE code = 'A-01' AND warehouse_id = $1",
-      [w1, w2],
-    );
-    expect(await sqlState(moveZone)).toBe(INTEGRITY_VIOLATION);
-    expect(await sqlState(moveLocation)).toBe(INTEGRITY_VIOLATION);
+    expect(
+      await sqlState(
+        pool.query("UPDATE locations.zone SET warehouse_id = $2 WHERE id = $1", [zone, w2]),
+      ),
+    ).toBe(INTEGRITY_VIOLATION);
+    expect(
+      await sqlState(
+        pool.query(
+          "UPDATE locations.location SET warehouse_id = $2 WHERE code = 'A-01' AND warehouse_id = $1",
+          [w1, w2],
+        ),
+      ),
+    ).toBe(INTEGRITY_VIOLATION);
   });
 
   it("refuses a location whose zone belongs to another warehouse", async () => {
@@ -144,16 +151,22 @@ describe.skipIf(!enabled)("locations schema (postgres)", () => {
   it("limits the length of the position fields", async () => {
     const w = await addWarehouse();
     await addLocation(w, "A-01");
-    const empty = pool.query(
-      "UPDATE locations.location SET aisle = '' WHERE code = 'A-01' AND warehouse_id = $1",
-      [w],
-    );
-    const long = pool.query(
-      "UPDATE locations.location SET bay = $2 WHERE code = 'A-01' AND warehouse_id = $1",
-      [w, "x".repeat(33)],
-    );
-    expect(await sqlState(empty)).toBe(CHECK_VIOLATION);
-    expect(await sqlState(long)).toBe(CHECK_VIOLATION);
+    expect(
+      await sqlState(
+        pool.query(
+          "UPDATE locations.location SET aisle = '' WHERE code = 'A-01' AND warehouse_id = $1",
+          [w],
+        ),
+      ),
+    ).toBe(CHECK_VIOLATION);
+    expect(
+      await sqlState(
+        pool.query(
+          "UPDATE locations.location SET bay = $2 WHERE code = 'A-01' AND warehouse_id = $1",
+          [w, "x".repeat(33)],
+        ),
+      ),
+    ).toBe(CHECK_VIOLATION);
   });
 
   it("refuses negative capacities", async () => {
