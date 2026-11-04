@@ -1,4 +1,12 @@
-import type { Item, ItemCategory, ItemStatus, ItemUom, Uom } from "../domain/model.js";
+import type {
+  Item,
+  ItemBarcode,
+  ItemCategory,
+  ItemStatus,
+  ItemUom,
+  ResolvedBarcode,
+  Uom,
+} from "../domain/model.js";
 
 export interface ItemFilter {
   status?: ItemStatus;
@@ -49,4 +57,16 @@ export interface CatalogRepository {
   listItemUoms(itemId: string): Promise<ItemUom[]>;
   addItemUom(u: ItemUom): Promise<ItemUom>;
   updateItemUom(u: ItemUom, expectedVersion: number): Promise<ItemUom>;
+
+  /**
+   * ConflictError for a barcode that already exists; RuleViolationError when the item or its
+   * unit does not exist, or the unit belongs to another item.
+   */
+  addBarcode(b: ItemBarcode): Promise<ItemBarcode>;
+  /** Ordered by barcode. */
+  listBarcodes(itemId: string): Promise<ItemBarcode[]>;
+  /** NotFoundError when it does not exist. */
+  deleteBarcode(id: string): Promise<void>;
+  /** Exact, case-sensitive match. Returns null for an unknown barcode. */
+  resolveBarcode(barcode: string): Promise<ResolvedBarcode | null>;
 }

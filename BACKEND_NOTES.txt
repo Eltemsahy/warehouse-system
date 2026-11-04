@@ -265,7 +265,8 @@ becomes (id, occurred_at); this is hard to change later.
   P1-4  Catalog, in steps:
         1 items, units, categories: schema + repositories ... DONE once migrate/tests are green
           (migration 007, section 16)
-        2 barcodes (schema, repository, resolve lookup) ... TODO
+        2 barcodes (schema, repository, resolve lookup) ... DONE once migrate/tests are green
+          (migration 008, section 17)
         3 services, API, public queries (getItem, exists, resolveBarcode) ... TODO
         4 suppliers ... TODO
         5 customers and addresses ... TODO
@@ -350,3 +351,16 @@ becomes (id, occurred_at); this is hard to change later.
 - Not built yet: tracking-flag changes once stock exists (inventory must be asked first),
   uom_conversion, brands, attributes, hazmat, kits.
 - Tests: tests/contract/catalog-repository.* (both adapters), tests/e2e/catalog-schema.pg.test.ts.
+
+17. CATALOG STEP 2: BARCODES (P1-4)
+-----------------------------------
+- Table catalog.item_barcode (migration 008): barcode (organisation-wide, exact and
+  case-sensitive, printable ASCII without spaces, 1 to 128 chars), type (EAN13, EAN8, UPC_A,
+  ITF14, CODE128, OTHER). A barcode identifies an item IN A UNIT: it points at an item_uom, and a
+  composite foreign key (item_uom_id, item_id) proves the unit belongs to the same item.
+- Repository: addBarcode, listBarcodes(itemId), deleteBarcode(id), resolveBarcode(barcode),
+  which returns the barcode, the item and the unit, so a scan of a case barcode tells you it is
+  12 each. Barcodes cannot be edited: remove and add (hard delete is fine, nothing references them).
+- resolveBarcode returns inactive items too; step 3 (services) decides what callers may see.
+- Tests: the barcode cases in tests/contract/catalog-repository.contract.ts and the barcode
+  checks in tests/e2e/catalog-schema.pg.test.ts.

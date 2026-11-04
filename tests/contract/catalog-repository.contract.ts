@@ -6,7 +6,13 @@ import {
   NotFoundError,
   RuleViolationError,
 } from "../../modules/catalog/domain/errors.js";
-import type { Item, ItemCategory, ItemUom, Uom } from "../../modules/catalog/domain/model.js";
+import type {
+  Item,
+  ItemBarcode,
+  ItemCategory,
+  ItemUom,
+  Uom,
+} from "../../modules/catalog/domain/model.js";
 
 type RepoFactory = () => CatalogRepository | Promise<CatalogRepository>;
 
@@ -333,6 +339,92 @@ export function catalogRepositoryContract(
         await expect(repo.updateItemUom({ ...cs, id: randomUUID() }, 1)).rejects.toBeInstanceOf(
           NotFoundError,
         );
+      });
+    });
+
+    describe("barcodes", () => {
+      /** An item with its base unit (EA) and a case unit (CS, 12 each). */
+      async function itemWithCase(repo: CatalogRepository) {
+        const stored = await insertWithBase(repo);
+        const cs = await repo.addItemUom(await itemUom(repo, stored.id, "CS", 12));
+        const [ea] = await repo.listItemUoms(stored.id);
+        return { stored, cs, ea: ea as ItemUom };
+      }
+      const barcode = (itemId: string, itemUomId: string, code = `B${uniq()}`): ItemBarcode => ({
+        id: randomUUID(),
+        itemId,
+        itemUomId,
+        barcode: code,
+        type: "EAN13",
+        createdAt: new Date(),
+        createdBy: null,
+      });
+
+      it("adds barcodes to an item unit and lists them in order", async () => {
+        const repo = await factory();
+        const { stored, cs, ea } = await itemWithCase(repo);
+        await repo.addBarcode(barcode(stored.id, cs.id, "9999"));
+        await repo.addBarcode(barcode(stored.id, ea.id, "1111"));
+        const listed = await repo.listBarcodes(stored.id);
+        expect(listed.map((b) => b.barcode)).toEqual(["1111", "9999"]);
+        expect(listed[1]).toMatchObject({ itemId: stored.id, itemUomId: cs.id, type: "EAN13" });
+      });
+
+      it("resolves a barcode to its item and the unit it identifies", async () => {
+        const repo = await factory();
+        const { stored, cs } = await itemWithCase(repo);
+        const code = `CASE${uniq()}`;
+        await repo.addBarcode(barcode(stored.id, cs.id, code));
+        const resolved = await repo.resolveBarcode(code);
+        expect(resolved?.item.id).toBe(stored.id);
+        expect(resolved?.itemUom).toMatchObject({ id: cs.id, qtyInBase: 12 });
+        expect(resolved?.itemUom.uom.code).toBe("CS");
+        expect(resolved?.barcode.barcode).toBe(code);
+      });
+
+      it("matches exactly: another case or an unknown barcode finds nothing", async () => {
+        const repo = await factory();
+        const { stored, ea } = await itemWithCase(repo);
+        const code = `Ab${uniq()}`;
+        await repo.addBarcode(barcode(stored.id, ea.id, code));
+        expect(await repo.resolveBarcode(code.toUpperCase())).toBeNull();
+        expect(await repo.resolveBarcode("NOPE-NOT-A-BARCODE")).toBeNull();
+      });
+
+      it("rejects a barcode that already exists, even on another item", async () => {
+        const repo = await factory();
+        const a = await itemWithCase(repo);
+        const b = await itemWithCase(repo);
+        const code = `DUP${uniq()}`;
+        await repo.addBarcode(barcode(a.stored.id, a.ea.id, code));
+        await expect(repo.addBarcode(barcode(b.stored.id, b.ea.id, code))).rejects.toBeInstanceOf(
+          ConflictError,
+        );
+      });
+
+      it("rejects an unknown item, an unknown unit, and a unit of another item", async () => {
+        const repo = await factory();
+        const a = await itemWithCase(repo);
+        const b = await itemWithCase(repo);
+        await expect(repo.addBarcode(barcode(randomUUID(), a.ea.id))).rejects.toBeInstanceOf(
+          RuleViolationError,
+        );
+        await expect(repo.addBarcode(barcode(a.stored.id, randomUUID()))).rejects.toBeInstanceOf(
+          RuleViolationError,
+        );
+        await expect(repo.addBarcode(barcode(a.stored.id, b.ea.id))).rejects.toBeInstanceOf(
+          RuleViolationError,
+        );
+      });
+
+      it("deletes a barcode, after which it no longer resolves", async () => {
+        const repo = await factory();
+        const { stored, ea } = await itemWithCase(repo);
+        const b = await repo.addBarcode(barcode(stored.id, ea.id));
+        await repo.deleteBarcode(b.id);
+        expect(await repo.resolveBarcode(b.barcode)).toBeNull();
+        expect(await repo.listBarcodes(stored.id)).toEqual([]);
+        await expect(repo.deleteBarcode(b.id)).rejects.toBeInstanceOf(NotFoundError);
       });
     });
   });

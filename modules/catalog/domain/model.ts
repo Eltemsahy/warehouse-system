@@ -60,6 +60,31 @@ export interface ItemUom extends Audited {
   weight: number | null;
 }
 
+// Printable ASCII without spaces, 1 to 128 characters: what scanners send.
+export const BARCODE_PATTERN = /^[!-~]{1,128}$/;
+export const BARCODE_MESSAGE = "must be 1 to 128 printable characters, without spaces";
+export const BARCODE_TYPES = ["EAN13", "EAN8", "UPC_A", "ITF14", "CODE128", "OTHER"] as const;
+export type BarcodeType = (typeof BARCODE_TYPES)[number];
+
+/** Identifies an item in one of its units. Immutable: remove it and add another instead. */
+export interface ItemBarcode {
+  id: string;
+  itemId: string;
+  itemUomId: string;
+  /** Organisation-wide, matched exactly (case-sensitive). */
+  barcode: string;
+  type: BarcodeType;
+  createdAt: Date;
+  createdBy: string | null;
+}
+
+/** What scanning a barcode tells you. */
+export interface ResolvedBarcode {
+  barcode: ItemBarcode;
+  item: Item;
+  itemUom: ItemUom;
+}
+
 /** Reference data that migration 007 seeds; the in-memory repository seeds the same. */
 export const DEFAULT_UOMS = [
   { code: "EA", name: "Each" },

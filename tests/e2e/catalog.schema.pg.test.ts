@@ -123,4 +123,46 @@ describe.skipIf(!enabled)("catalog schema (postgres)", () => {
     );
     expect(await sqlState(twice)).toBe(UNIQUE_VIOLATION);
   });
+
+  describe("barcodes", () => {
+    async function unitFor(itemId: string, code = "EA") {
+      const id = randomUUID();
+      await pool.query(
+        "INSERT INTO catalog.item_uom (id, item_id, uom_id, qty_in_base) VALUES ($1, $2, $3, 1)",
+        [id, itemId, await uomId(code)],
+      );
+      return id;
+    }
+    const addBarcode = (itemId: string, itemUomId: string, barcode: string, type = "EAN13") =>
+      pool.query(
+        "INSERT INTO catalog.item_barcode (id, item_id, item_uom_id, barcode, type) VALUES ($1, $2, $3, $4, $5)",
+        [randomUUID(), itemId, itemUomId, barcode, type],
+      );
+
+    it("rejects barcodes with the wrong format or type", async () => {
+      const item = await addItem();
+      const unit = await unitFor(item);
+      for (const bad of ["has space", "", "x".repeat(129), "caf\u00e9"]) {
+        expect(await sqlState(addBarcode(item, unit, bad)), JSON.stringify(bad)).toBe(
+          CHECK_VIOLATION,
+        );
+      }
+      expect(await sqlState(addBarcode(item, unit, `B${uniq()}`, "WEIRD"))).toBe(CHECK_VIOLATION);
+    });
+
+    it("keeps barcodes unique, matching case exactly", async () => {
+      const item = await addItem();
+      const unit = await unitFor(item);
+      const code = `Ab${uniq()}`;
+      await addBarcode(item, unit, code);
+      expect(await sqlState(addBarcode(item, unit, code))).toBe(UNIQUE_VIOLATION);
+      expect(await sqlState(addBarcode(item, unit, code.toUpperCase()))).toBeUndefined();
+    });
+
+    it("refuses a unit that belongs to another item", async () => {
+      const [a, b] = [await addItem(), await addItem()];
+      const unitOfB = await unitFor(b);
+      expect(await sqlState(addBarcode(a, unitOfB, `B${uniq()}`))).toBe("23503");
+    });
+  });
 });

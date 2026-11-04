@@ -4,8 +4,10 @@ import { ConflictError, NotFoundError, RuleViolationError } from "../domain/erro
 import {
   DEFAULT_UOMS,
   type Item,
+  type ItemBarcode,
   type ItemCategory,
   type ItemUom,
+  type ResolvedBarcode,
   type Uom,
 } from "../domain/model.js";
 
@@ -22,6 +24,7 @@ export class InMemoryCatalogRepository implements CatalogRepository {
   private categories = new Map<string, ItemCategory>();
   private items = new Map<string, Item>();
   private itemUoms = new Map<string, ItemUom>();
+  private barcodes = new Map<string, ItemBarcode>();
 
   /** `seed` loads the same units of measure that migration 007 inserts. */
   constructor(seed = true) {
@@ -183,6 +186,42 @@ export class InMemoryCatalogRepository implements CatalogRepository {
       weight: u.weight,
       ...this.touched(u.updatedBy, current.version),
     });
+  }
+
+  // ---- barcodes
+
+  async addBarcode(b: ItemBarcode) {
+    const unit = this.itemUoms.get(b.itemUomId);
+    if (!this.items.has(b.itemId)) throw new RuleViolationError("the item does not exist");
+    if (!unit || unit.itemId !== b.itemId) {
+      throw new RuleViolationError("the item unit does not exist for this item");
+    }
+    if ([...this.barcodes.values()].some((x) => x.barcode === b.barcode)) {
+      throw new ConflictError("this barcode already exists");
+    }
+    return this.store(this.barcodes, { ...copy(b), createdAt: new Date() });
+  }
+
+  async listBarcodes(itemId: string) {
+    return [...this.barcodes.values()]
+      .filter((b) => b.itemId === itemId)
+      .sort(byKey((b) => b.barcode))
+      .map(copy);
+  }
+
+  async deleteBarcode(id: string) {
+    if (!this.barcodes.delete(id)) throw new NotFoundError("barcode");
+  }
+
+  async resolveBarcode(barcode: string): Promise<ResolvedBarcode | null> {
+    for (const b of this.barcodes.values()) {
+      if (b.barcode !== barcode) continue;
+      const item = this.items.get(b.itemId);
+      const itemUom = this.itemUoms.get(b.itemUomId);
+      if (!item || !itemUom) return null;
+      return { barcode: copy(b), item: copy(item), itemUom: copy(itemUom) };
+    }
+    return null;
   }
 
   // ---- helpers

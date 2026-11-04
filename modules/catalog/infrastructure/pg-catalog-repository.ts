@@ -6,7 +6,17 @@ import {
   NotFoundError,
   RuleViolationError,
 } from "../domain/errors.js";
-import type { Audited, Item, ItemCategory, ItemStatus, ItemUom, Uom } from "../domain/model.js";
+import type {
+  Audited,
+  BarcodeType,
+  Item,
+  ItemBarcode,
+  ItemCategory,
+  ItemStatus,
+  ItemUom,
+  ResolvedBarcode,
+  Uom,
+} from "../domain/model.js";
 
 const UNIQUE_VIOLATION = "23505";
 const FOREIGN_KEY_VIOLATION = "23503";
@@ -114,6 +124,25 @@ const toItemUom = (r: ItemUomRow): ItemUom => ({
   height: num(r.height),
   weight: num(r.weight),
   ...audit(r),
+});
+
+interface BarcodeRow {
+  id: string;
+  item_id: string;
+  item_uom_id: string;
+  barcode: string;
+  type: BarcodeType;
+  created_at: Date;
+  created_by: string | null;
+}
+const toBarcode = (r: BarcodeRow): ItemBarcode => ({
+  id: r.id,
+  itemId: r.item_id,
+  itemUomId: r.item_uom_id,
+  barcode: r.barcode,
+  type: r.type,
+  createdAt: r.created_at,
+  createdBy: r.created_by,
 });
 
 const ITEM_SELECT = `
@@ -349,6 +378,53 @@ export class PgCatalogRepository implements CatalogRepository {
       translate(e, "conflicting item unit", "invalid item unit");
     }
     return this.mustGetItemUom(u.id);
+  }
+
+  // ---- barcodes
+
+  async addBarcode(b: ItemBarcode): Promise<ItemBarcode> {
+    try {
+      const { rows } = await this.pool.query<BarcodeRow>(
+        `INSERT INTO catalog.item_barcode (id, item_id, item_uom_id, barcode, type, created_by)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         RETURNING *`,
+        [b.id, b.itemId, b.itemUomId, b.barcode, b.type, b.createdBy],
+      );
+      return toBarcode(first(rows));
+    } catch (e) {
+      return translate(
+        e,
+        "this barcode already exists",
+        "the item, or its unit, does not exist for this item",
+      );
+    }
+  }
+
+  async listBarcodes(itemId: string): Promise<ItemBarcode[]> {
+    const { rows } = await this.pool.query<BarcodeRow>(
+      'SELECT * FROM catalog.item_barcode WHERE item_id = $1 ORDER BY barcode COLLATE "C"',
+      [itemId],
+    );
+    return rows.map(toBarcode);
+  }
+
+  async deleteBarcode(id: string): Promise<void> {
+    const res = await this.pool.query("DELETE FROM catalog.item_barcode WHERE id = $1", [id]);
+    if (res.rowCount === 0) throw new NotFoundError("barcode");
+  }
+
+  async resolveBarcode(barcode: string): Promise<ResolvedBarcode | null> {
+    const { rows } = await this.pool.query<BarcodeRow>(
+      "SELECT * FROM catalog.item_barcode WHERE barcode = $1",
+      [barcode],
+    );
+    const row = rows[0];
+    if (!row) return null;
+    const [item, itemUom] = await Promise.all([
+      this.getItem(row.item_id),
+      this.mustGetItemUom(row.item_uom_id),
+    ]);
+    return item ? { barcode: toBarcode(row), item, itemUom } : null;
   }
 
   // ---- helpers
