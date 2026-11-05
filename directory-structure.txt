@@ -26,6 +26,7 @@ warehouse-system/
 ├── tsconfig.build.json               # Build-only TypeScript config for compiling the backend to dist/
 ├── tsconfig.json                     # Shared TypeScript config for the backend workspace
 ├── vitest.config.ts                  # Vitest configuration for running project tests
+├── dist/                            # Compiled backend JavaScript output generated from the TypeScript build
 │
 ├── apps/
 │   ├── api/
@@ -51,6 +52,11 @@ warehouse-system/
 │       ├── tsconfig.json            # Project references for frontend TypeScript setup
 │       ├── tsconfig.node.json       # TypeScript config for Vite config files and tooling
 │       ├── vite.config.ts           # Vite configuration with React and Tailwind integration
+│       ├── dist/                    # Production Vite bundle generated for deployment/static hosting
+│       │   ├── assets/              # Minified JS and CSS assets for the hydrated app shell
+│       │   ├── favicon.svg          # Browser favicon copied into the built frontend output
+│       │   ├── icons.svg            # SVG sprite included in the production build
+│       │   └── index.html           # Generated app entry document for the built admin UI
 │       ├── public/
 │       │   ├── favicon.svg          # Browser tab icon for the app shell
 │       │   └── icons.svg            # SVG sprite used by the admin interface
@@ -92,7 +98,8 @@ warehouse-system/
 │   │   ├── 004_idempotency_key.sql  # Adds idempotency keys for safe retry handling on mutations
 │   │   ├── 005_inventory_warehouse_scope.sql # Adds warehouse-scoped inventory constraints and keys
 │   │   ├── 006_locations.sql        # Creates warehouse, zone, and location reference data tables
-│   │   └── 007_catalog_items.sql    # Adds catalog and item-level reference tables for products and SKUs
+│   │   ├── 007_catalog_items.sql    # Adds catalog and item-level reference tables for products and SKUs
+│   │   └── 008_catalog_barcodes.sql # Adds catalog barcode tables and item barcode tracking
 │   └── seeds/
 │       └── dev.sql                 # Local development seed data for demo warehouses and sample inventory
 │
@@ -118,19 +125,24 @@ warehouse-system/
 │       └── index.ts                # ERP adapter entrypoint for future system integration
 │
 ├── modules/
-│   ├── catalog/                     # Empty scaffold for SKUs, units, categories, and product metadata
-│   │   ├── README.md               # Module readme describing ownership, layers, and rules for the catalog domain
-│   │   ├── index.ts                # Public module interface stub for future catalog features
+│   ├── catalog/                     # Catalog module for product metadata, SKU data, and barcode support
+│   │   ├── README.md               # Module README covering catalog ownership, contracts, and boundaries
+│   │   ├── index.ts                # Public catalog module exports
 │   │   ├── api/
-│   │   │   └── .gitkeep            # Keeps the empty API folder in version control
+│   │   │   └── .gitkeep            # Keeps the empty API layer in version control
 │   │   ├── application/
-│   │   │   └── .gitkeep            # Keeps the empty application layer in version control
+│   │   │   ├── .gitkeep            # Keeps the empty application layer in version control
+│   │   │   └── ports.ts            # Repository contracts used by the catalog module
 │   │   ├── domain/
-│   │   │   └── .gitkeep            # Keeps the empty domain layer in version control
+│   │   │   ├── .gitkeep            # Keeps the empty domain layer in version control
+│   │   │   ├── errors.ts           # Catalog validation errors and domain constraints
+│   │   │   └── model.ts            # Product, SKU, and item model definitions
 │   │   └── infrastructure/
-│   │       └── .gitkeep            # Keeps the empty infrastructure layer in version control
+│   │       ├── .gitkeep            # Keeps the empty infrastructure layer in version control
+│   │       ├── in-memory-catalog-repository.ts # In-memory catalog repository for tests and local execution
+│   │       └── pg-catalog-repository.ts # PostgreSQL-backed catalog repository implementation
 │   │
-│   ├── identity/                    # Empty scaffold for users, roles, permissions, and auth-related concerns
+│   ├── identity/                    # Empty scaffold for users, roles, permissions, and auth concerns
 │   │   ├── README.md               # Module readme describing the identity domain and boundaries
 │   │   ├── index.ts                # Public interface stub for future identity services
 │   │   ├── api/
@@ -246,7 +258,31 @@ warehouse-system/
 │       └── logger.ts              # Structured JSON logger driven by LOG_LEVEL
 │
 ├── tests/
-│   ├── contract/                   # Reserved for contract-style tests and public API agreement checks
-│   └── e2e/
-│       └── inventory.test.ts       # End-to-end tests for stock adjustment and transfer workflows
+│   ├── contract/                   # Contract-style tests for repository and integration behavior
+│   │   ├── .gitkeep                # Keeps the folder in version control before new contract tests land
+│   │   ├── catalog-repository.contract.ts # Repository contract for catalog persistence behavior
+│   │   ├── catalog-repository.test.ts # Concrete catalog repository contract test
+│   │   ├── idempotency-store.contract.ts # Contract for idempotency store semantics
+│   │   ├── idempotency-store.test.ts # Idempotency store verification tests
+│   │   ├── locations-repository.contract.ts # Location repository contract for domain model expectations
+│   │   ├── locations-repository.test.ts # Concrete location repository contract tests
+│   │   ├── outbox.contract.ts      # Outbox contract for durable event emission
+│   │   ├── outbox.test.ts          # Outbox tests against the shared contract
+│   │   ├── stock-ledger.contract.ts # Stock ledger contract for ledger semantics
+│   │   └── stock-ledger.test.ts    # Stock ledger implementation tests
+│   ├── e2e/                        # End-to-end flow tests covering API and database integration
+│   │   ├── catalog.schema.pg.test.ts # Catalog schema validation against Postgres
+│   │   ├── http.test.ts            # HTTP smoke tests and API behavior checks
+│   │   ├── idempotency.test.ts     # E2E coverage for duplicate-request suppression
+│   │   ├── inventory.pg.test.ts    # Postgres-backed inventory workflow checks
+│   │   ├── inventory.test.ts       # End-to-end tests for stock adjustment and transfer workflows
+│   │   ├── ledger-integrity.test.ts # Ledger integrity reconciliation checks
+│   │   ├── locations.api.test.ts   # Warehouse and location API flow tests
+│   │   └── locations.schema.pg.test.ts # Location schema checks for Postgres-backed storage
+│   ├── helpers/
+│   │   └── serve.ts               # Local HTTP server helper for integration tests
+│   └── unit/
+│       ├── daily-job.test.ts      # Scheduler unit test coverage for daily jobs
+│       ├── locations.test.ts      # Business logic tests for location rules and domain behavior
+│       └── shutdown.test.ts       # Graceful shutdown behavior tests
 │
