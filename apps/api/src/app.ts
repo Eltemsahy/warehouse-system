@@ -19,6 +19,11 @@ import {
   PgStockLedger,
 } from "../../../modules/inventory/index.js";
 import {
+  createCatalogModule,
+  InMemoryCatalogRepository,
+  PgCatalogRepository,
+} from "../../../modules/catalog/index.js";
+import {
   createLocationsModule,
   InMemoryLocationsRepository,
   PgLocationsRepository,
@@ -43,6 +48,7 @@ function createPersistence() {
       dispatcher: new PgOutbox(pool),
       idempotencyStore: new PgIdempotencyStore(pool),
       locationsRepository: new PgLocationsRepository(pool),
+      catalogRepository: new PgCatalogRepository(pool),
       readiness,
     };
   }
@@ -54,6 +60,7 @@ function createPersistence() {
     dispatcher: outbox,
     idempotencyStore: new InMemoryIdempotencyStore(),
     locationsRepository: new InMemoryLocationsRepository(),
+    catalogRepository: new InMemoryCatalogRepository(),
     readiness,
   };
 }
@@ -64,8 +71,15 @@ export function buildApp() {
   const lifecycle = { shuttingDown: false };
   const isShuttingDown = () => lifecycle.shuttingDown;
 
-  const { ledger, auditor, dispatcher, idempotencyStore, locationsRepository, readiness } =
-    createPersistence();
+  const {
+    ledger,
+    auditor,
+    dispatcher,
+    idempotencyStore,
+    locationsRepository,
+    catalogRepository,
+    readiness,
+  } = createPersistence();
 
   // Probes first: cheap, unauthenticated, and unaffected by the middleware below.
   app.use(connectionCloseWhenShuttingDown(isShuttingDown));
@@ -85,6 +99,9 @@ export function buildApp() {
 
   const locations = createLocationsModule({ repository: locationsRepository });
   app.use("/locations", locations.router);
+
+  const catalog = createCatalogModule({ repository: catalogRepository });
+  app.use("/catalog", catalog.router);
 
   // Subscribers only ever see committed events, delivered at least once, and a failing
   // subscriber is retried by the relay instead of failing the HTTP request (TRD G2, G3).

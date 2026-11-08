@@ -27,6 +27,7 @@ What exists today:
 
 - **Inventory:** stock adjustments, transfers and balances, per warehouse, on an append-only movement ledger (see `docs/adr/0002-inventory-ledger.md` and `docs/adr/0004-tenancy-quantities-and-inventory-keys.md`).
 - **Locations:** warehouses, zones and locations, with location types, capacity and storage classes. Codes are unique per warehouse and never change (see `docs/adr/0004-tenancy-quantities-and-inventory-keys.md`).
+- **Catalog:** items with their units of measure, categories and units of measure. A SKU is unique and never changes, and an item's base unit never changes (see `docs/adr/0004-tenancy-quantities-and-inventory-keys.md`).
 - **Reliable events:** a transactional outbox delivers `inventory.StockAdjusted` and `inventory.StockTransferred` after commit, with retries and a dead-letter store.
 - **Safe retries:** mutating requests accept an `Idempotency-Key`, so a retried request never writes twice.
 - **Operations:** liveness and readiness endpoints, graceful shutdown, a nightly ledger integrity check, and a production Docker image that migrates before it serves.
@@ -35,7 +36,7 @@ What exists today:
 What does not exist yet:
 
 - **Authentication and authorisation.** Every route is open, so do not expose the API publicly yet.
-- **The other modules.** `catalog`, `identity`, `inbound`, `outbound` and `shipping` are empty scaffolds, as is `integrations/`.
+- **The other modules.** `identity`, `inbound`, `outbound` and `shipping` are empty scaffolds, as is `integrations/`.
 - **A finished frontend.** `apps/web-admin` is in early development. It is linted and built by its own CI job, but it is not covered by the root Prettier setup. `apps/mobile-scanner` is a placeholder.
 
 For the build status against the implementation plan, and the design decisions behind it, see `BACKEND_NOTES.txt`.
@@ -226,6 +227,25 @@ curl -X POST localhost:3000/locations/warehouses/<id>/locations -H 'content-type
   -d '{"code":"A-01-02","type":"BIN","storageClasses":["AMBIENT"]}'
 ```
 
+### Catalog
+
+| Method         | Path                             | Purpose                                                                         |
+| -------------- | -------------------------------- | ------------------------------------------------------------------------------- |
+| `POST`, `GET`  | `/catalog/items`                 | Create an item (its base unit is created for you); list with filters and paging |
+| `GET`, `PATCH` | `/catalog/items/:sku`            | Read an item with its units; update it                                          |
+| `GET`, `POST`  | `/catalog/items/:sku/units`      | List or add the item's units (case, pallet, ...)                                |
+| `PATCH`        | `/catalog/items/:sku/units/:uom` | Change a unit's quantity or dimensions                                          |
+| `GET`, `POST`  | `/catalog/categories`            | List or create categories (a tree)                                              |
+| `PATCH`        | `/catalog/categories/:code`      | Rename a category                                                               |
+| `GET`, `POST`  | `/catalog/uoms`                  | List or add units of measure (EA, CS and PL are seeded)                         |
+
+Updates (`PATCH`) must send the `version` you last read; a stale one gives `409`. SKUs, codes and an item's base unit can never be changed, and neither can the tracking flags (`isLotTracked`, `isSerialTracked`, `hasExpiry`) once the item exists: a body that contains them is rejected with `400`. Retire an item with `"status": "INACTIVE"`. Stock is counted in whole numbers of the base unit, and each unit says how many base units it holds (`qtyInBase`; the base unit is always 1). Percent-encode a `/` inside a SKU when you put it in a URL.
+
+```bash
+curl -X POST localhost:3000/catalog/items -H 'content-type: application/json' \
+  -d '{"sku":"JAM-1","description":"Strawberry jam","baseUom":"EA","units":[{"uom":"CS","qtyInBase":12}]}'
+```
+
 ### Idempotency keys
 
 Send an `Idempotency-Key` header (1 to 255 printable characters, for example a UUID) on any `POST`, `PUT`, `PATCH` or `DELETE` so the request can be retried safely, for instance after a lost response on a flaky connection.
@@ -282,7 +302,8 @@ apps/
 modules/           one folder per domain module
   inventory/       implemented
   locations/       implemented (warehouses, zones, locations)
-  catalog/ identity/ inbound/ outbound/ shipping/   empty scaffolds
+  catalog/         implemented in steps (items, units, categories so far; barcodes API next)
+  identity/ inbound/ outbound/ shipping/   empty scaffolds
 shared/
   kernel/          Result, ids, DomainEvent
   events/          in-process event bus, transactional outbox and relay

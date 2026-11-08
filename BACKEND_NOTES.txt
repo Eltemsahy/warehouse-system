@@ -267,7 +267,9 @@ becomes (id, occurred_at); this is hard to change later.
           (migration 007, section 16)
         2 barcodes (schema, repository, resolve lookup) ... DONE once migrate/tests are green
           (migration 008, section 17)
-        3 services, API, public queries (getItem, exists, resolveBarcode) ... TODO
+        3a services + API for items, units, categories, units of measure ... DONE once tests are
+           green (section 18)
+        3b barcode endpoints + public queries (getItem, exists, resolveBarcode) ... TODO
         4 suppliers ... TODO
         5 customers and addresses ... TODO
   P1-1 identity, P1-2 audit, P1-5 inventory validation, P1-6 seed data ... TODO.
@@ -364,3 +366,19 @@ becomes (id, occurred_at); this is hard to change later.
 - resolveBarcode returns inactive items too; step 3 (services) decides what callers may see.
 - Tests: the barcode cases in tests/contract/catalog-repository.contract.ts and the barcode
   checks in tests/e2e/catalog-schema.pg.test.ts.
+
+18. CATALOG STEP 3A: SERVICES AND API (P1-4)
+--------------------------------------------
+- Mounted at /catalog (see the README for the endpoint table). No migration.
+- Creating an item also creates its base unit (quantity 1) in the same step; the optional `units`
+  list adds more (and may carry the base unit's dimensions). The base unit always holds 1.
+- Decision (confirm or adjust): the tracking flags (isLotTracked, isSerialTracked, hasExpiry) are
+  fixed at creation and rejected on PATCH, because changing them once stock exists would change
+  what that stock means and the catalog cannot ask inventory yet. They can be relaxed once
+  inventory can report whether an item has stock. shelfLifeDays is editable only on an item with
+  hasExpiry. Deactivating an item that still has stock is allowed: like locations, P1-5 must let
+  stock move OUT of an inactive item.
+- Categories are referenced by code in the API (`category`, `parent`); the parent is fixed at
+  creation so no cycles can form. Changing a pack size (qtyInBase of a non-base unit) is allowed
+  with the version check; it changes what that unit's barcodes mean, so treat it as an admin fix.
+- Tests: tests/e2e/catalog.test.ts (services), tests/e2e/catalog-api.test.ts (HTTP).
