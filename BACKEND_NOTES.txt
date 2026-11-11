@@ -269,7 +269,8 @@ becomes (id, occurred_at); this is hard to change later.
           (migration 008, section 17)
         3a services + API for items, units, categories, units of measure ... DONE once tests are
            green (section 18)
-        3b barcode endpoints + public queries (getItem, exists, resolveBarcode) ... TODO
+        3b barcode endpoints + public queries (getItem, exists, resolveBarcode) ... DONE once tests
+           are green (section 19)
         4 suppliers ... TODO
         5 customers and addresses ... TODO
   P1-1 identity, P1-2 audit, P1-5 inventory validation, P1-6 seed data ... TODO.
@@ -382,3 +383,17 @@ becomes (id, occurred_at); this is hard to change later.
   creation so no cycles can form. Changing a pack size (qtyInBase of a non-base unit) is allowed
   with the version check; it changes what that unit's barcodes mean, so treat it as an admin fix.
 - Tests: tests/e2e/catalog.test.ts (services), tests/e2e/catalog-api.test.ts (HTTP).
+
+19. CATALOG STEP 3B: BARCODE API AND PUBLIC QUERIES (P1-4)
+----------------------------------------------------------
+- Barcode endpoints (README): add and list per item, remove, and a scan lookup. A barcode must
+  name a unit the item already has (add the unit first). A scan returns the item, the unit and
+  qtyInBase; an inactive item still scans and shows its status, so a scanner can warn.
+- Public interface (modules/catalog/index.ts): getItem(sku) (exact match; returns a small view
+  that includes isActive and the tracking flags), exists(sku) (exists AND active), and
+  resolveBarcode(barcode) (item view plus unit and quantity). P1-5 validates inventory against
+  these together with the locations queries.
+- Same draining rule as locations: an inactive item must still allow stock to move OUT of it;
+  getItem returns inactive items for exactly that reason, exists does not.
+- Remaining for P1-4: step 4 suppliers, step 5 customers and addresses.
+- Tests: tests/e2e/catalog-barcodes.test.ts (services, public queries, HTTP).

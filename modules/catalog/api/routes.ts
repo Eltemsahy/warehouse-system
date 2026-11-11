@@ -1,11 +1,19 @@
 import { Router, type Response } from "express";
 import { z } from "zod";
 import type { Result } from "../../../shared/kernel/index.js";
+import type {
+  BarcodeService,
+  BarcodeView,
+  ScannedBarcode,
+} from "../application/barcode-service.js";
 import type { CategoryService, CategoryView } from "../application/category-service.js";
 import type { ItemDetail, ItemService, ItemView } from "../application/item-service.js";
 import type { UomService } from "../application/uom-service.js";
 import { ConflictError, NotFoundError, type CatalogError } from "../domain/errors.js";
 import {
+  BARCODE_MESSAGE,
+  BARCODE_PATTERN,
+  BARCODE_TYPES,
   CODE_MESSAGE,
   CODE_PATTERN,
   ITEM_STATUSES,
@@ -22,6 +30,12 @@ const hasChanges = (body: Record<string, unknown>) =>
 const itemParams = z.object({ sku: code });
 const unitParams = z.object({ sku: code, uom: code });
 const categoryParams = z.object({ code });
+const barcode = z.string().regex(BARCODE_PATTERN, BARCODE_MESSAGE);
+const barcodeParams = z.object({ barcode });
+const itemBarcodeParams = z.object({ sku: code, barcode });
+const addBarcode = z
+  .object({ barcode, uom: code, type: z.enum(BARCODE_TYPES).optional() })
+  .strict();
 
 const unitInput = z
   .object({
@@ -125,6 +139,21 @@ const presentCategory = (c: CategoryView) => ({
   version: c.version,
 });
 const presentUom = (u: Uom) => ({ code: u.code, name: u.name });
+const presentBarcode = (b: BarcodeView) => ({
+  barcode: b.barcode,
+  type: b.type,
+  uom: b.uom,
+  qtyInBase: b.qtyInBase,
+});
+const presentScan = (s: ScannedBarcode) => ({
+  ...presentBarcode(s),
+  item: {
+    sku: s.item.sku,
+    description: s.item.description,
+    status: s.item.status,
+    baseUom: s.item.baseUom.code,
+  },
+});
 
 function statusOf(error: CatalogError): number {
   if (error instanceof NotFoundError) return 404;
@@ -146,6 +175,7 @@ export interface CatalogRouteDeps {
   items: ItemService;
   categories: CategoryService;
   uoms: UomService;
+  barcodes: BarcodeService;
 }
 
 /**
@@ -251,6 +281,39 @@ export function catalogRoutes(deps: CatalogRouteDeps) {
       200,
       presentUnit,
     );
+  });
+
+  // ---- barcodes (percent-encode a `/` inside a barcode when you put it in a URL)
+
+  r.post("/items/:sku/barcodes", async (req, res) => {
+    const params = itemParams.safeParse(req.params);
+    if (!params.success) return res.status(400).json(params.error.flatten());
+    const body = addBarcode.safeParse(req.body);
+    if (!body.success) return res.status(400).json(body.error.flatten());
+    return send(res, await deps.barcodes.add(params.data.sku, body.data), 201, presentBarcode);
+  });
+
+  r.get("/items/:sku/barcodes", async (req, res) => {
+    const params = itemParams.safeParse(req.params);
+    if (!params.success) return res.status(400).json(params.error.flatten());
+    return send(res, await deps.barcodes.list(params.data.sku), 200, (list) => ({
+      items: list.map(presentBarcode),
+    }));
+  });
+
+  r.delete("/items/:sku/barcodes/:barcode", async (req, res) => {
+    const params = itemBarcodeParams.safeParse(req.params);
+    if (!params.success) return res.status(400).json(params.error.flatten());
+    const result = await deps.barcodes.remove(params.data.sku, params.data.barcode);
+    if (result.ok) return res.status(204).end();
+    return res.status(statusOf(result.error)).json({ error: result.error.message });
+  });
+
+  /** Scan: which item and unit does this barcode identify? */
+  r.get("/barcodes/:barcode", async (req, res) => {
+    const params = barcodeParams.safeParse(req.params);
+    if (!params.success) return res.status(400).json(params.error.flatten());
+    return send(res, await deps.barcodes.resolve(params.data.barcode), 200, presentScan);
   });
 
   return r;
