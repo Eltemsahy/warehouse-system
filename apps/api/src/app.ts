@@ -15,6 +15,7 @@ import { logger } from "../../../shared/observability/index.js";
 import {
   createInventoryModule,
   InMemoryLedger,
+  MasterDataReferences,
   PgLedgerAuditor,
   PgStockLedger,
 } from "../../../modules/inventory/index.js";
@@ -94,13 +95,18 @@ export function buildApp() {
   // and never runs a second write (TRD s5.5). Must come after express.json().
   app.use(idempotency(idempotencyStore));
 
-  const inventory = createInventoryModule({ ledger, auditor });
-  app.use("/inventory", inventory.router);
-
   const locations = createLocationsModule({ repository: locationsRepository });
-  app.use("/locations", locations.router);
-
   const catalog = createCatalogModule({ repository: catalogRepository });
+
+  // Inventory only takes stock for warehouses, locations and SKUs that exist in the master
+  // data, and only adds stock to active ones (P1-5). The modules meet only here.
+  const inventory = createInventoryModule({
+    ledger,
+    auditor,
+    references: new MasterDataReferences(locations, catalog),
+  });
+  app.use("/inventory", inventory.router);
+  app.use("/locations", locations.router);
   app.use("/catalog", catalog.router);
 
   // Subscribers only ever see committed events, delivered at least once, and a failing

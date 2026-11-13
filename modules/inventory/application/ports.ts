@@ -12,6 +12,26 @@ export interface StockLedger {
   balance(warehouseId: string, sku: string, locationId: string): Promise<number>;
 }
 
+/**
+ * Whether stock may be posted at a place, according to the master data (P1-5, ADR 0004).
+ * The application layer only knows this port; the composition root supplies an adapter backed
+ * by the catalog and locations modules.
+ */
+export interface StockReferences {
+  /**
+   * A message saying why stock cannot be posted, or undefined when it can.
+   * "IN" adds stock: the warehouse, location and SKU must exist and be active.
+   * "OUT" removes stock: they must exist but may be inactive, so that stock left in a retired
+   * location (or of a retired SKU) can still be moved out.
+   */
+  problem(
+    warehouseId: string,
+    sku: string,
+    locationId: string,
+    direction: "IN" | "OUT",
+  ): Promise<string | undefined>;
+}
+
 /** A (warehouse, sku, location) whose cached balance no longer matches the ledger (ADR 0002). */
 export interface LedgerDiscrepancy {
   warehouseId: string;

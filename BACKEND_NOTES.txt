@@ -273,7 +273,8 @@ becomes (id, occurred_at); this is hard to change later.
            are green (section 19)
         4 suppliers ... TODO
         5 customers and addresses ... TODO
-  P1-1 identity, P1-2 audit, P1-5 inventory validation, P1-6 seed data ... TODO.
+  P1-5  Inventory validates SKU and location ... DONE once tests are green (section 20).
+  P1-1 identity, P1-2 audit, P1-6 seed data ... TODO.
 - G13 (NEW, found while writing ADR 0004, not in the TRD gap list): the Schema doc makes
   location.code unique per warehouse, UNIQUE(warehouse_id, code), but inventory keys
   stock_levels on (sku, location_id) with the code alone. Two warehouses that both have a
@@ -397,3 +398,25 @@ becomes (id, occurred_at); this is hard to change later.
   getItem returns inactive items for exactly that reason, exists does not.
 - Remaining for P1-4: step 4 suppliers, step 5 customers and addresses.
 - Tests: tests/e2e/catalog-barcodes.test.ts (services, public queries, HTTP).
+
+20. INVENTORY VALIDATES MASTER DATA (P1-5, ADR 0004)
+----------------------------------------------------
+- Port: StockReferences.problem(warehouseId, sku, locationId, "IN" | "OUT") in inventory's
+  application layer. Adapter: MasterDataReferences (inventory/infrastructure), built from small
+  structural interfaces (LocationDirectory, ItemDirectory), so inventory imports neither module.
+  The composition root (apps/api/src/app.ts) builds locations and catalog first and passes the
+  adapter in; the modules meet only there.
+- Rules: adding stock (adjust with delta > 0, or a transfer's destination) needs an active
+  warehouse, an active location in that warehouse, and an active SKU. Removing stock (delta < 0, or
+  a transfer's source) only needs them to exist, so stock left in a retired location or SKU can be
+  moved out. Unknown or inactive-when-adding gives 422 with a message. Matching is exact
+  (case-sensitive) for SKUs and location codes.
+- createInventoryModule() without `references` stays permissive (tests, scripts). The app always
+  passes it.
+- Not decided: a BLOCKED location (operational status) is NOT checked; counts and corrections
+  must still be possible there. Revisit with the receiving and putaway flows.
+- Not enforced anywhere yet: retiring a location or SKU that still holds stock. Allowed on
+  purpose (draining must be possible); a report of "stock in retired places" would help later.
+- Development data written before this step (the placeholder warehouse of migration 005) can no
+  longer be posted to: create real master data and post new stock.
+- Tests: tests/unit/master-data-references.test.ts, tests/e2e/inventory-validation.test.ts.

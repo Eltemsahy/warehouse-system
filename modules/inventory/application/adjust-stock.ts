@@ -2,7 +2,7 @@ import { err, ok, type Result } from "../../../shared/kernel/index.js";
 import { InsufficientStockError } from "../domain/errors.js";
 import { createMovement, type StockMovement } from "../domain/stock-movement.js";
 import { stockAdjusted } from "../domain/events.js";
-import type { StockLedger } from "./ports.js";
+import type { StockLedger, StockReferences } from "./ports.js";
 
 export interface AdjustStockInput {
   warehouseId: string;
@@ -13,10 +13,20 @@ export interface AdjustStockInput {
 }
 
 export class AdjustStock {
-  constructor(private ledger: StockLedger) {}
+  constructor(
+    private ledger: StockLedger,
+    private references?: StockReferences,
+  ) {}
 
   async execute(i: AdjustStockInput): Promise<Result<StockMovement>> {
     if (i.delta === 0) return err(new Error("delta must be non-zero"));
+    const problem = await this.references?.problem(
+      i.warehouseId,
+      i.sku,
+      i.locationId,
+      i.delta > 0 ? "IN" : "OUT",
+    );
+    if (problem) return err(new Error(problem));
     const current = await this.ledger.balance(i.warehouseId, i.sku, i.locationId);
     if (current + i.delta < 0) {
       return err(new Error("insufficient stock: balance cannot go negative"));

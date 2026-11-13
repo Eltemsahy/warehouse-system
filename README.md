@@ -25,7 +25,7 @@ A modular monolith for warehouse and logistics operations, built with TypeScript
 
 What exists today:
 
-- **Inventory:** stock adjustments, transfers and balances, per warehouse, on an append-only movement ledger (see `docs/adr/0002-inventory-ledger.md` and `docs/adr/0004-tenancy-quantities-and-inventory-keys.md`).
+- **Inventory:** stock adjustments, transfers and balances, per warehouse, on an append-only movement ledger that only accepts known, active SKUs, locations and warehouses (see `docs/adr/0002-inventory-ledger.md` and `docs/adr/0004-tenancy-quantities-and-inventory-keys.md`).
 - **Locations:** warehouses, zones and locations, with location types, capacity and storage classes. Codes are unique per warehouse and never change (see `docs/adr/0004-tenancy-quantities-and-inventory-keys.md`).
 - **Catalog:** items with their units of measure, barcodes, categories and units of measure. A SKU is unique and never changes, and an item's base unit never changes (see `docs/adr/0004-tenancy-quantities-and-inventory-keys.md`).
 - **Reliable events:** a transactional outbox delivers `inventory.StockAdjusted` and `inventory.StockTransferred` after commit, with retries and a dead-letter store.
@@ -175,11 +175,21 @@ Or work inside the folder directly: `cd apps/web-admin`, then `npm install` and 
 
 Inventory is scoped to a warehouse through the path (see `docs/adr/0004-tenancy-quantities-and-inventory-keys.md`). `warehouseId` is a UUID. A location code is unique within its warehouse, so two warehouses can both have an `A-01` and their stock stays separate. SKUs and location codes are exact-match, case-sensitive text of 1 to 64 characters: letters, digits, `.`, `_`, `/` and `-`. A transfer stays inside one warehouse.
 
-Request bodies are JSON. The examples use `00000000-0000-0000-0000-000000000001`, the placeholder warehouse that migration 005 gave to any existing development data. Example requests (bash, then PowerShell):
+Request bodies are JSON. Inventory only takes stock for a warehouse, SKU and location that exist in the master data (see [Locations](#locations) and [Catalog](#catalog)), and only **adds** stock to active ones. Stock can always be **removed** from a retired location, SKU or warehouse, so whatever is left in it can be moved out. An unknown or inactive one is refused with `422`. So set up some master data first, then post stock (bash, then PowerShell):
 
 ```bash
-WH=00000000-0000-0000-0000-000000000001
+# 1. Master data. Copy the warehouse "id" from the first reply into WH.
+curl -X POST localhost:3000/locations/warehouses -H 'content-type: application/json' \
+  -d '{"code":"CAI-1","name":"Cairo DC"}'
+WH=<the id from the reply above>
+curl -X POST localhost:3000/catalog/items -H 'content-type: application/json' \
+  -d '{"sku":"SKU-1","description":"Test item","baseUom":"EA"}'
+curl -X POST localhost:3000/locations/warehouses/$WH/locations -H 'content-type: application/json' \
+  -d '{"code":"A-01","type":"BIN"}'
+curl -X POST localhost:3000/locations/warehouses/$WH/locations -H 'content-type: application/json' \
+  -d '{"code":"B-02","type":"BIN"}'
 
+# 2. Stock.
 curl -X POST localhost:3000/inventory/warehouses/$WH/adjustments -H 'content-type: application/json' \
   -d '{"sku":"SKU-1","locationId":"A-01","delta":10,"reason":"initial count"}'
 
@@ -190,8 +200,15 @@ curl localhost:3000/inventory/warehouses/$WH/skus/SKU-1/locations/A-01/balance
 ```
 
 ```powershell
-$wh = "00000000-0000-0000-0000-000000000001"
+# 1. Master data.
+$json = @{ ContentType = "application/json" }
+$wh = (Invoke-RestMethod -Method Post http://localhost:3000/locations/warehouses @json -Body (@{ code="CAI-1"; name="Cairo DC" } | ConvertTo-Json)).id
+Invoke-RestMethod -Method Post http://localhost:3000/catalog/items @json -Body (@{ sku="SKU-1"; description="Test item"; baseUom="EA" } | ConvertTo-Json)
+foreach ($code in "A-01", "B-02") {
+  Invoke-RestMethod -Method Post http://localhost:3000/locations/warehouses/$wh/locations @json -Body (@{ code=$code; type="BIN" } | ConvertTo-Json)
+}
 
+# 2. Stock.
 $body = @{ sku="SKU-1"; locationId="A-01"; delta=10; reason="initial count" } | ConvertTo-Json
 Invoke-RestMethod -Method Post http://localhost:3000/inventory/warehouses/$wh/adjustments -ContentType "application/json" -Body $body
 
@@ -266,8 +283,8 @@ Keys are remembered for 24 hours. Successful responses and 4xx rejections are st
 ```bash
 curl -X POST localhost:3000/inventory/warehouses/$WH/adjustments -H 'content-type: application/json' \
   -H 'Idempotency-Key: demo-1' \
-  -d '{"sku":"SKU-9","locationId":"A-01","delta":5,"reason":"idempotency demo"}'
-# send it again: same response, Idempotent-Replayed: true, balance stays 5
+  -d '{"sku":"SKU-1","locationId":"A-01","delta":5,"reason":"idempotency demo"}'
+# send it again: same response, Idempotent-Replayed: true, and the balance rises by 5 only once
 ```
 
 ### Errors

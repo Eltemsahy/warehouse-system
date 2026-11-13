@@ -363,10 +363,13 @@ export function catalogRepositoryContract(
       it("adds barcodes to an item unit and lists them in order", async () => {
         const repo = await factory();
         const { stored, cs, ea } = await itemWithCase(repo);
-        await repo.addBarcode(barcode(stored.id, cs.id, "9999"));
-        await repo.addBarcode(barcode(stored.id, ea.id, "1111"));
+        const prefix = `ORDER-${uniq()}-`;
+        const first = `${prefix}1111`;
+        const second = `${prefix}9999`;
+        await repo.addBarcode(barcode(stored.id, cs.id, second));
+        await repo.addBarcode(barcode(stored.id, ea.id, first));
         const listed = await repo.listBarcodes(stored.id);
-        expect(listed.map((b) => b.barcode)).toEqual(["1111", "9999"]);
+        expect(listed.map((b) => b.barcode)).toEqual([first, second]);
         expect(listed[1]).toMatchObject({ itemId: stored.id, itemUomId: cs.id, type: "EAN13" });
       });
 
