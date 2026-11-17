@@ -17,6 +17,7 @@
     "web:lint": "npm --prefix apps/web-admin run lint",
     "migrate": "tsx db/migrate.ts",
     "migrate:prod": "node dist/db/migrate.js",
+    "seed": "tsx db/seed.ts",
     "check:ledger": "tsx db/check-ledger.ts",
     "lint": "eslint .",
     "format": "prettier --write .",
