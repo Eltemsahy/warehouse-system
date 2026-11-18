@@ -120,6 +120,16 @@ npm run migrate
 
 The runner applies each file in `db/migrations/` once, in order, and records it (with a checksum) in `platform.schema_migrations`. Running it again is safe: applied files print `skipping`. It refuses to run if an applied file was edited, so to change the schema add a new numbered file instead.
 
+### Demo data (optional)
+
+To try the API with something in it, load a small demo set after migrating:
+
+```bash
+npm run seed
+```
+
+It creates a warehouse `DEMO` (id `00000000-0000-0000-0000-000000000001`) with four zones and eight locations (`A-01` to `A-03` pick bins, `B-01` to `B-03` pallet positions, and two staging areas), five items (`SKU-1`, `WIDGET-100`, `JAM-200`, `WATER-300`, `BOLT-400`) with cases and pallets, barcodes for them, and some starting stock. It is safe to run again, because it skips anything that already exists and never overwrites or deletes. It is for development only: it refuses to run when `NODE_ENV=production`.
+
 ## Running the app
 
 ### API
@@ -175,7 +185,7 @@ Or work inside the folder directly: `cd apps/web-admin`, then `npm install` and 
 
 Inventory is scoped to a warehouse through the path (see `docs/adr/0004-tenancy-quantities-and-inventory-keys.md`). `warehouseId` is a UUID. A location code is unique within its warehouse, so two warehouses can both have an `A-01` and their stock stays separate. SKUs and location codes are exact-match, case-sensitive text of 1 to 64 characters: letters, digits, `.`, `_`, `/` and `-`. A transfer stays inside one warehouse.
 
-Request bodies are JSON. Inventory only takes stock for a warehouse, SKU and location that exist in the master data (see [Locations](#locations) and [Catalog](#catalog)), and only **adds** stock to active ones. Stock can always be **removed** from a retired location, SKU or warehouse, so whatever is left in it can be moved out. An unknown or inactive one is refused with `422`. So set up some master data first, then post stock (bash, then PowerShell):
+Request bodies are JSON. Inventory only takes stock for a warehouse, SKU and location that exist in the master data (see [Locations](#locations) and [Catalog](#catalog)), and only **adds** stock to active ones. Stock can always be **removed** from a retired location, SKU or warehouse, so whatever is left in it can be moved out. An unknown or inactive one is refused with `422`. So set up some master data first, then post stock. (Or load the [demo data](#demo-data-optional) and use warehouse `00000000-0000-0000-0000-000000000001`, SKU `SKU-1` and locations `A-01` and `B-02`.) Examples in bash, then PowerShell:
 
 ```bash
 # 1. Master data. Copy the warehouse "id" from the first reply into WH.
@@ -347,6 +357,7 @@ tests/             unit/, contract/, e2e/, helpers/
 | `npm start`            | Runs the compiled API (`dist/apps/api/src/main.js`)                                   |
 | `npm run migrate`      | Applies pending migrations (development, via `tsx`)                                   |
 | `npm run migrate:prod` | Applies pending migrations from the compiled build                                    |
+| `npm run seed`         | Loads the demo data (development only; safe to run again)                             |
 | `npm run check:ledger` | Runs the ledger integrity check once (exit 0 consistent, 1 mismatch, 2 could not run) |
 | `npm test`             | Runs all tests with Vitest                                                            |
 | `npm run typecheck`    | Type-checks without emitting (`tsc --noEmit`)                                         |

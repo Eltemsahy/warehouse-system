@@ -274,7 +274,8 @@ becomes (id, occurred_at); this is hard to change later.
         4 suppliers ... TODO
         5 customers and addresses ... TODO
   P1-5  Inventory validates SKU and location ... DONE once tests are green (section 20).
-  P1-1 identity, P1-2 audit, P1-6 seed data ... TODO.
+  P1-6  Seed data ......................... DONE once `npm run seed` and the tests are green (section 21).
+  P1-1 identity, P1-2 audit ... TODO (P1-1 will be built in several small steps).
 - G13 (NEW, found while writing ADR 0004, not in the TRD gap list): the Schema doc makes
   location.code unique per warehouse, UNIQUE(warehouse_id, code), but inventory keys
   stock_levels on (sku, location_id) with the code alone. Two warehouses that both have a
@@ -420,3 +421,22 @@ becomes (id, occurred_at); this is hard to change later.
 - Development data written before this step (the placeholder warehouse of migration 005) can no
   longer be posted to: create real master data and post new stock.
 - Tests: tests/unit/master-data-references.test.ts, tests/e2e/inventory-validation.test.ts.
+
+21. DEMO DATA (P1-6)
+--------------------
+- `npm run seed` (db/seed.ts) loads db/seeds/dev.sql in one transaction: warehouse DEMO with the
+  placeholder id of migration 005 (00000000-0000-0000-0000-000000000001), 4 zones, 8 locations,
+  categories, 5 items with units, 8 barcodes (GS1 internal-use prefix 200, valid check digits)
+  and starting stock for 4 of the items. SKU-1 and locations A-01 and B-02 exist but SKU-1 has no
+  starting stock, so the README examples still show the numbers they promise.
+- Idempotent: every statement uses ON CONFLICT DO NOTHING; nothing is overwritten or deleted.
+  Stock goes in as a ledger movement ("dev seed") only when its balance row is new, so
+  `npm run check:ledger` stays clean. Seeding writes no outbox events.
+- Safety: the runner refuses when NODE_ENV=production, and the production image does not contain
+  the seed file (copy-migrations.mjs copies migrations only).
+- Edge case: if a different warehouse already uses the code DEMO, the demo rows cannot attach to
+  the fixed id and the seed fails on a foreign key. Rename or remove that warehouse in development.
+- CI runs `npm run seed` after migrate, then the tests (tests/e2e/seed.pg.test.ts runs it again
+  and checks it is idempotent, readable through the modules, accepted by inventory, and
+  consistent with the ledger).
+- package.json needs: "seed": "tsx db/seed.ts"

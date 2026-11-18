@@ -66,6 +66,8 @@ jobs:
         with: { node-version: 20, cache: npm }
       - run: npm ci
       - run: npm run migrate
+      # The demo data must load on a fresh database (and the tests then load it again).
+      - run: npm run seed
       - run: npm test
       # After the whole suite has hammered the ledger, the books must still balance.
       - run: npm run check:ledger
