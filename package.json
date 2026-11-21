@@ -22,7 +22,8 @@
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:staged": "lint-staged",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "create-admin": "tsx db/create-admin.ts"
   },
   "lint-staged": {
     "*.{cjs,css,html,js,json,md,mjs,svg,ts,tsx,yml}": "prettier --write"

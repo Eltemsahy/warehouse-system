@@ -25,6 +25,11 @@ import {
   PgCatalogRepository,
 } from "../../../modules/catalog/index.js";
 import {
+  createIdentityModule,
+  InMemoryIdentityRepository,
+  PgIdentityRepository,
+} from "../../../modules/identity/index.js";
+import {
   createLocationsModule,
   InMemoryLocationsRepository,
   PgLocationsRepository,
@@ -50,6 +55,7 @@ function createPersistence() {
       idempotencyStore: new PgIdempotencyStore(pool),
       locationsRepository: new PgLocationsRepository(pool),
       catalogRepository: new PgCatalogRepository(pool),
+      identityRepository: new PgIdentityRepository(pool),
       readiness,
     };
   }
@@ -62,6 +68,7 @@ function createPersistence() {
     idempotencyStore: new InMemoryIdempotencyStore(),
     locationsRepository: new InMemoryLocationsRepository(),
     catalogRepository: new InMemoryCatalogRepository(),
+    identityRepository: new InMemoryIdentityRepository(),
     readiness,
   };
 }
@@ -79,6 +86,7 @@ export function buildApp() {
     idempotencyStore,
     locationsRepository,
     catalogRepository,
+    identityRepository,
     readiness,
   } = createPersistence();
 
@@ -97,6 +105,7 @@ export function buildApp() {
 
   const locations = createLocationsModule({ repository: locationsRepository });
   const catalog = createCatalogModule({ repository: catalogRepository });
+  const identity = createIdentityModule({ repository: identityRepository });
 
   // Inventory only takes stock for warehouses, locations and SKUs that exist in the master
   // data, and only adds stock to active ones (P1-5). The modules meet only here.
@@ -108,6 +117,7 @@ export function buildApp() {
   app.use("/inventory", inventory.router);
   app.use("/locations", locations.router);
   app.use("/catalog", catalog.router);
+  app.use("/identity", identity.router);
 
   // Subscribers only ever see committed events, delivered at least once, and a failing
   // subscriber is retried by the relay instead of failing the HTTP request (TRD G2, G3).
