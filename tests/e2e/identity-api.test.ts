@@ -6,6 +6,8 @@ import { closeServers, serve } from "../helpers/serve.js";
 
 afterAll(closeServers);
 
+type ApiBody = Record<string, unknown> & { id?: string; items?: unknown[] };
+
 async function start() {
   const m = createIdentityModule({ hasher: new ScryptPasswordHasher({ N: 2 ** 10, r: 8, p: 1 }) });
   const app = express();
@@ -22,7 +24,7 @@ async function call(base: string, method: string, path: string, body?: unknown) 
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   const text = await res.text();
-  return { status: res.status, body: text ? (JSON.parse(text) as Record<string, any>) : null };
+  return { status: res.status, body: text ? (JSON.parse(text) as ApiBody) : null };
 }
 
 const jane = {
