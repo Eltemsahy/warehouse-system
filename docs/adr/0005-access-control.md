@@ -1,0 +1,13 @@
+# ADR 0005: Access control: roles, permissions and warehouse access
+
+- **Status:** Accepted
+- **Context:** The PRD (IDN-2) asks for role-based access control with per-warehouse scoping, and the TRD (section 6) says it must be enforced in the application layer, not only in the UI. The Schema doc names the tables (`role`, `permission`, `role_permission`, `user_role`, `user_warehouse_access`) and says the warehouse id is a soft reference, so identity cannot join to the locations schema (ADR 0001).
+- **Decision:**
+  1. **Permissions are fixed by the code.** A permission is a dotted code such as `inventory.adjust` (resource `inventory`, action `adjust`). The set is seeded by migration and changes only through a new migration, together with the code that checks it. There is no API to create permissions.
+  2. **Roles are seeded system roles** for the PRD personas: `ADMIN`, `WAREHOUSE_MANAGER`, `INVENTORY_CONTROLLER`, `RECEIVER`, `PUTAWAY_OPERATOR`, `PICKER`, `PACKER`. They cannot be edited through the API. Custom roles can be added later if a real need appears. A user may hold several roles, and their permissions add up.
+  3. **Warehouse scoping is separate from permissions.** A permission says what a user may do; `user_warehouse_access` says in which warehouses. A warehouse-scoped action needs both. Actions that belong to no warehouse (the catalog, user administration) need only the permission.
+  4. **Administrators see every warehouse.** A role carries `all_warehouses`; only `ADMIN` has it. Holding such a role grants access to all warehouses, including ones created later, so an administrator never needs one grant per warehouse.
+  5. **The warehouse id is validated in the composition root**, through a small port that `app.ts` implements with the locations public query. Granting access to an unknown warehouse is refused; revoking access to a warehouse that no longer resolves still works.
+  6. **The system always keeps one active administrator.** Removing `ADMIN` from, or disabling, the last active holder is refused. The check is read-then-write, so two simultaneous requests could in theory both pass it; at the expected volume of administrator changes that risk is accepted.
+  7. **Later modules add their own permissions** in their own migrations and grant them to the roles that need them, in the same change as the code that checks them.
+- **Consequences:** Checking a request is a pure function over one "effective access" record (permissions, all-warehouses flag, warehouse ids), which is easy to test and to cache. Enforcement on routes follows in a later step; until then the routes stay open. Access is checked from the database on each request at first; a cache can come later.
