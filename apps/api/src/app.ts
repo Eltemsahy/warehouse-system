@@ -105,7 +105,11 @@ export function buildApp() {
 
   const locations = createLocationsModule({ repository: locationsRepository });
   const catalog = createCatalogModule({ repository: catalogRepository });
-  const identity = createIdentityModule({ repository: identityRepository });
+  // Access grants name warehouses: identity asks locations whether they exist (soft reference).
+  const identity = createIdentityModule({
+    repository: identityRepository,
+    warehouses: { exists: async (id) => (await locations.getWarehouse(id)) !== null },
+  });
 
   // Inventory only takes stock for warehouses, locations and SKUs that exist in the master
   // data, and only adds stock to active ones (P1-5). The modules meet only here.

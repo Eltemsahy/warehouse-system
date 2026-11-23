@@ -10,6 +10,7 @@ import type { IdentityRepository, PasswordHasher, UserFilter, UserPage } from ".
 import {
   attempt,
   emailProblem,
+  isLastActiveAdmin,
   localeProblem,
   newAudit,
   textProblem,
@@ -95,6 +96,9 @@ export class UserService {
       (USER_STATUSES.includes(next.status) ? undefined : "status is not valid");
     if (problem) return violation(problem);
 
+    if (next.status === "DISABLED" && (await isLastActiveAdmin(this.repo, current))) {
+      return violation("the last active administrator cannot be disabled");
+    }
     return attempt(() => this.repo.updateUser(next, i.version));
   }
 

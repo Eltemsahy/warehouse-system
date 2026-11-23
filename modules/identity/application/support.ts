@@ -1,11 +1,14 @@
 import { err, ok, type Result } from "../../../shared/kernel/index.js";
 import { IdentityError, RuleViolationError } from "../domain/errors.js";
+import type { IdentityRepository } from "./ports.js";
 import {
+  ADMIN_ROLE,
   EMAIL_PATTERN,
   LOCALE_PATTERN,
   USERNAME_MESSAGE,
   USERNAME_PATTERN,
   type Audited,
+  type UserAccount,
 } from "../domain/model.js";
 
 /** Runs a repository call and turns the module's own errors into a Result. */
@@ -40,4 +43,19 @@ export const localeProblem = (locale: string) =>
 export function textProblem(what: string, value: string, max: number): string | undefined {
   const length = value.trim().length;
   return length >= 1 && length <= max ? undefined : `${what} must be 1 to ${max} characters`;
+}
+
+export const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * True when this user is an active administrator and no other active user holds ADMIN: taking
+ * the role away, or disabling the account, would leave nobody able to manage access.
+ */
+export async function isLastActiveAdmin(
+  repo: IdentityRepository,
+  user: UserAccount,
+): Promise<boolean> {
+  if (user.status !== "ACTIVE") return false;
+  if (!(await repo.listUserRoles(user.id)).includes(ADMIN_ROLE)) return false;
+  return (await repo.otherActiveHolders(ADMIN_ROLE, user.id)) === 0;
 }

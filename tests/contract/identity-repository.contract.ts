@@ -2,7 +2,11 @@ import { randomUUID } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import type { IdentityRepository } from "../../modules/identity/application/ports.js";
 import { ConflictError, NotFoundError } from "../../modules/identity/domain/errors.js";
-import type { UserAccount } from "../../modules/identity/domain/model.js";
+import {
+  PERMISSIONS,
+  SYSTEM_ROLES,
+  type UserAccount,
+} from "../../modules/identity/domain/model.js";
 
 type RepoFactory = () => IdentityRepository | Promise<IdentityRepository>;
 
@@ -168,6 +172,99 @@ export function identityRepositoryContract(
       expect(page1.nextAfter).toBe(`${p}.b`);
       const page2 = await repo.listUsers({ limit: 2, after: page1.nextAfter ?? "" });
       expect(page2.items.map((x) => x.username).slice(0, 2)).toEqual([`${p}.c`, `${p}.d`]);
+    });
+
+    // ---- roles and warehouse access (ADR 0005)
+
+    const byCode = <T extends { code: string }>(a: T, b: T) => (a.code < b.code ? -1 : 1);
+    const newUser = async (repo: IdentityRepository, over: Partial<UserAccount> = {}) =>
+      repo.insertUser(user(over), HASH, "scrypt");
+
+    it("has the roles and permissions the domain declares, nothing more or less", async () => {
+      const repo = await factory();
+      expect(await repo.listRoles()).toEqual(SYSTEM_ROLES);
+      expect(await repo.listPermissions()).toEqual([...PERMISSIONS].sort(byCode));
+    });
+
+    it("assigns roles idempotently, lists them sorted and removes them", async () => {
+      const repo = await factory();
+      const u = await newUser(repo);
+      expect(await repo.listUserRoles(u.id)).toEqual([]);
+      await repo.assignRole(u.id, "PICKER");
+      await repo.assignRole(u.id, "ADMIN");
+      await repo.assignRole(u.id, "PICKER"); // again: no error, no duplicate
+      expect(await repo.listUserRoles(u.id)).toEqual(["ADMIN", "PICKER"]);
+      expect(await repo.removeRole(u.id, "PICKER")).toBe(true);
+      expect(await repo.removeRole(u.id, "PICKER")).toBe(false);
+      expect(await repo.removeRole(randomUUID(), "PICKER")).toBe(false);
+      expect(await repo.listUserRoles(u.id)).toEqual(["ADMIN"]);
+    });
+
+    it("refuses to assign an unknown role or to an unknown user", async () => {
+      const repo = await factory();
+      const u = await newUser(repo);
+      await expect(repo.assignRole(u.id, "NO_SUCH_ROLE")).rejects.toBeInstanceOf(NotFoundError);
+      await expect(repo.assignRole(randomUUID(), "PICKER")).rejects.toBeInstanceOf(NotFoundError);
+    });
+
+    it("grants and revokes warehouse access idempotently, sorted", async () => {
+      const repo = await factory();
+      const u = await newUser(repo);
+      const [w1, w2] = [randomUUID(), randomUUID()].sort();
+      await repo.grantWarehouse(u.id, w2 as string);
+      await repo.grantWarehouse(u.id, w1 as string);
+      await repo.grantWarehouse(u.id, w1 as string);
+      expect(await repo.listWarehouseAccess(u.id)).toEqual([w1, w2]);
+      expect(await repo.revokeWarehouse(u.id, w1 as string)).toBe(true);
+      expect(await repo.revokeWarehouse(u.id, w1 as string)).toBe(false);
+      expect(await repo.listWarehouseAccess(u.id)).toEqual([w2]);
+      await expect(repo.grantWarehouse(randomUUID(), w1 as string)).rejects.toBeInstanceOf(
+        NotFoundError,
+      );
+    });
+
+    it("works out effective access from every role and grant", async () => {
+      const repo = await factory();
+      const u = await newUser(repo);
+      expect(await repo.getAccess(u.id)).toEqual({
+        permissions: [],
+        allWarehouses: false,
+        warehouseIds: [],
+      });
+
+      await repo.assignRole(u.id, "PICKER");
+      await repo.assignRole(u.id, "PUTAWAY_OPERATOR");
+      const w = randomUUID();
+      await repo.grantWarehouse(u.id, w);
+      const expected = [
+        ...new Set(
+          SYSTEM_ROLES.filter((r) => ["PICKER", "PUTAWAY_OPERATOR"].includes(r.code)).flatMap(
+            (r) => r.permissions,
+          ),
+        ),
+      ].sort();
+      expect(await repo.getAccess(u.id)).toEqual({
+        permissions: expected,
+        allWarehouses: false,
+        warehouseIds: [w],
+      });
+
+      await repo.assignRole(u.id, "ADMIN");
+      const admin = await repo.getAccess(u.id);
+      expect(admin.allWarehouses).toBe(true);
+      expect(admin.permissions).toEqual(PERMISSIONS.map((p) => p.code).sort());
+    });
+
+    it("counts the other active holders of a role", async () => {
+      const repo = await factory();
+      const [a, b] = [await newUser(repo), await newUser(repo)];
+      const base = await repo.otherActiveHolders("PACKER", randomUUID()); // others may hold it already
+      await repo.assignRole(a.id, "PACKER");
+      await repo.assignRole(b.id, "PACKER");
+      expect(await repo.otherActiveHolders("PACKER", randomUUID())).toBe(base + 2);
+      expect(await repo.otherActiveHolders("PACKER", a.id)).toBe(base + 1);
+      await repo.updateUser({ ...b, status: "DISABLED" }, 1); // a disabled holder does not count
+      expect(await repo.otherActiveHolders("PACKER", a.id)).toBe(base);
     });
   });
 }

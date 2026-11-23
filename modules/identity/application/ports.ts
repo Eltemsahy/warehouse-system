@@ -1,4 +1,11 @@
-import type { Credential, UserAccount, UserStatus } from "../domain/model.js";
+import type {
+  Credential,
+  Permission,
+  Role,
+  UserAccess,
+  UserAccount,
+  UserStatus,
+} from "../domain/model.js";
 
 export interface UserFilter {
   status?: UserStatus;
@@ -46,4 +53,31 @@ export interface IdentityRepository {
 
   getCredential(userId: string): Promise<Credential | null>;
   setPassword(userId: string, passwordHash: string, algorithm: string): Promise<void>;
+
+  // ---- roles and warehouse access (ADR 0005)
+
+  /** Every role with its permission codes, sorted by role code. */
+  listRoles(): Promise<Role[]>;
+  listPermissions(): Promise<Permission[]>;
+  /** Codes of the roles the user holds, sorted. */
+  listUserRoles(userId: string): Promise<string[]>;
+  /** Idempotent. NotFoundError when the user or the role does not exist. */
+  assignRole(userId: string, roleCode: string): Promise<void>;
+  /** True when the assignment existed and was removed. */
+  removeRole(userId: string, roleCode: string): Promise<boolean>;
+  /** Warehouse ids granted to the user one by one, sorted. */
+  listWarehouseAccess(userId: string): Promise<string[]>;
+  /** Idempotent. NotFoundError when the user does not exist. */
+  grantWarehouse(userId: string, warehouseId: string): Promise<void>;
+  /** True when the grant existed and was removed. */
+  revokeWarehouse(userId: string, warehouseId: string): Promise<boolean>;
+  /** Effective access from all the user's roles and grants, whatever the user's status. */
+  getAccess(userId: string): Promise<UserAccess>;
+  /** How many ACTIVE users other than `excludingUserId` hold the role. */
+  otherActiveHolders(roleCode: string, excludingUserId: string): Promise<number>;
+}
+
+/** Tells identity whether a warehouse exists. Implemented in the composition root. */
+export interface WarehouseDirectory {
+  exists(warehouseId: string): Promise<boolean>;
 }

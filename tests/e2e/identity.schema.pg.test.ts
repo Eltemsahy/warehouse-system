@@ -107,4 +107,146 @@ describe.skipIf(!enabled)("identity schema (postgres)", () => {
       ),
     ).toBe(UNIQUE_VIOLATION);
   });
+
+  describe("access control tables", () => {
+    const newUserId = async () => {
+      const id = randomUUID();
+      await pool.query(
+        "INSERT INTO identity.user_account (id, username, display_name) VALUES ($1, $2, 'T')",
+        [id, `user.${uniq()}`],
+      );
+      return id;
+    };
+    const roleId = async (code: string) =>
+      (await pool.query<{ id: string }>("SELECT id FROM identity.role WHERE code = $1", [code]))
+        .rows[0]?.id;
+
+    it("seeds the system roles, flagging only ADMIN as all-warehouses", async () => {
+      const { rows } = await pool.query<{
+        code: string;
+        is_system: boolean;
+        all_warehouses: boolean;
+      }>("SELECT code, is_system, all_warehouses FROM identity.role");
+      const byCode = new Map(rows.map((r) => [r.code, r]));
+      for (const code of [
+        "ADMIN",
+        "WAREHOUSE_MANAGER",
+        "INVENTORY_CONTROLLER",
+        "RECEIVER",
+        "PUTAWAY_OPERATOR",
+        "PICKER",
+        "PACKER",
+      ]) {
+        expect(byCode.get(code)?.is_system, code).toBe(true);
+      }
+      expect(rows.filter((r) => r.all_warehouses).map((r) => r.code)).toEqual(["ADMIN"]);
+    });
+
+    it("gives ADMIN every permission", async () => {
+      const { rows } = await pool.query<{ missing: string }>(
+        `SELECT p.code AS missing FROM identity.permission p
+          WHERE NOT EXISTS (SELECT 1 FROM identity.role_permission rp
+                              JOIN identity.role r ON r.id = rp.role_id
+                             WHERE r.code = 'ADMIN' AND rp.permission_id = p.id)`,
+      );
+      expect(rows).toEqual([]);
+    });
+
+    it("keeps role and permission codes well formed and unique", async () => {
+      expect(
+        await sqlState(
+          pool.query(
+            "INSERT INTO identity.role (code, name, description) VALUES ('lower', 'x', 'x')",
+          ),
+        ),
+      ).toBe(CHECK_VIOLATION);
+      expect(
+        await sqlState(
+          pool.query(
+            "INSERT INTO identity.role (code, name, description) VALUES ('PICKER', 'x', 'x')",
+          ),
+        ),
+      ).toBe(UNIQUE_VIOLATION);
+      expect(
+        await sqlState(
+          pool.query(
+            "INSERT INTO identity.permission (code, resource, action) VALUES ('Bad Code', 'x', 'y')",
+          ),
+        ),
+      ).toBe(CHECK_VIOLATION);
+      expect(
+        await sqlState(
+          pool.query(
+            "INSERT INTO identity.permission (code, resource, action) VALUES ('inventory.adjust', 'inventory', 'adjust')",
+          ),
+        ),
+      ).toBe(UNIQUE_VIOLATION);
+    });
+
+    it("only assigns existing roles to existing users, once", async () => {
+      const user = await newUserId();
+      const picker = await roleId("PICKER");
+      expect(
+        await sqlState(
+          pool.query("INSERT INTO identity.user_role (user_id, role_id) VALUES ($1, $2)", [
+            randomUUID(),
+            picker,
+          ]),
+        ),
+      ).toBe(FOREIGN_KEY_VIOLATION);
+      expect(
+        await sqlState(
+          pool.query("INSERT INTO identity.user_role (user_id, role_id) VALUES ($1, $2)", [
+            user,
+            randomUUID(),
+          ]),
+        ),
+      ).toBe(FOREIGN_KEY_VIOLATION);
+      expect(
+        await sqlState(
+          pool.query("INSERT INTO identity.user_role (user_id, role_id) VALUES ($1, $2)", [
+            user,
+            picker,
+          ]),
+        ),
+      ).toBeUndefined();
+      expect(
+        await sqlState(
+          pool.query("INSERT INTO identity.user_role (user_id, role_id) VALUES ($1, $2)", [
+            user,
+            picker,
+          ]),
+        ),
+      ).toBe(UNIQUE_VIOLATION);
+    });
+
+    it("only grants warehouse access to existing users, once per warehouse", async () => {
+      const user = await newUserId();
+      const warehouse = randomUUID();
+      expect(
+        await sqlState(
+          pool.query(
+            "INSERT INTO identity.user_warehouse_access (user_id, warehouse_id) VALUES ($1, $2)",
+            [randomUUID(), warehouse],
+          ),
+        ),
+      ).toBe(FOREIGN_KEY_VIOLATION);
+      expect(
+        await sqlState(
+          pool.query(
+            "INSERT INTO identity.user_warehouse_access (user_id, warehouse_id) VALUES ($1, $2)",
+            [user, warehouse],
+          ),
+        ),
+      ).toBeUndefined();
+      expect(
+        await sqlState(
+          pool.query(
+            "INSERT INTO identity.user_warehouse_access (user_id, warehouse_id) VALUES ($1, $2)",
+            [user, warehouse],
+          ),
+        ),
+      ).toBe(UNIQUE_VIOLATION);
+    });
+  });
 });

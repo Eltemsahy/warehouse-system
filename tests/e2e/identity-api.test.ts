@@ -6,10 +6,13 @@ import { closeServers, serve } from "../helpers/serve.js";
 
 afterAll(closeServers);
 
-type ApiBody = Record<string, unknown> & { id?: string; items?: unknown[] };
+const WAREHOUSE = "11111111-1111-4111-8111-111111111111";
 
 async function start() {
-  const m = createIdentityModule({ hasher: new ScryptPasswordHasher({ N: 2 ** 10, r: 8, p: 1 }) });
+  const m = createIdentityModule({
+    hasher: new ScryptPasswordHasher({ N: 2 ** 10, r: 8, p: 1 }),
+    warehouses: { exists: async (id) => id === WAREHOUSE },
+  });
   const app = express();
   app.use(express.json());
   app.use("/identity", m.router);
@@ -24,7 +27,7 @@ async function call(base: string, method: string, path: string, body?: unknown) 
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   const text = await res.text();
-  return { status: res.status, body: text ? (JSON.parse(text) as ApiBody) : null };
+  return { status: res.status, body: text ? (JSON.parse(text) as Record<string, any>) : null };
 }
 
 const jane = {
@@ -128,5 +131,79 @@ describe("identity API", () => {
     expect(
       (await call(base, "PATCH", `/users/${id}`, { version: 1, displayName: "B" })).status,
     ).toBe(409);
+  });
+
+  it("lists the roles and permissions that exist", async () => {
+    const base = await start();
+    const roles = await call(base, "GET", "/roles");
+    expect(roles.status).toBe(200);
+    const codes = (roles.body?.items as { code: string }[]).map((r) => r.code);
+    expect(codes).toContain("ADMIN");
+    expect(codes).toContain("PICKER");
+    const perms = await call(base, "GET", "/permissions");
+    expect(perms.body?.items).toContainEqual({
+      code: "inventory.adjust",
+      resource: "inventory",
+      action: "adjust",
+    });
+  });
+
+  it("assigns and removes roles, and refuses to strip the last administrator", async () => {
+    const base = await start();
+    const id = (await call(base, "POST", "/users", jane)).body?.id as string;
+
+    expect((await call(base, "PUT", `/users/${id}/roles/PICKER`)).status).toBe(204);
+    expect((await call(base, "PUT", `/users/${id}/roles/PICKER`)).status).toBe(204); // idempotent
+    expect((await call(base, "GET", `/users/${id}/roles`)).body?.items).toMatchObject([
+      { code: "PICKER" },
+    ]);
+    expect((await call(base, "PUT", `/users/${id}/roles/NO_SUCH_ROLE`)).status).toBe(404);
+    expect((await call(base, "PUT", `/users/${id}/roles/lowercase`)).status).toBe(400);
+    expect(
+      (await call(base, "PUT", `/users/00000000-0000-4000-8000-000000000000/roles/PICKER`)).status,
+    ).toBe(404);
+    expect((await call(base, "DELETE", `/users/${id}/roles/PICKER`)).status).toBe(204);
+    expect((await call(base, "DELETE", `/users/${id}/roles/PICKER`)).status).toBe(404);
+
+    await call(base, "PUT", `/users/${id}/roles/ADMIN`);
+    expect((await call(base, "DELETE", `/users/${id}/roles/ADMIN`)).status).toBe(422);
+    expect(
+      (await call(base, "PATCH", `/users/${id}`, { version: 1, status: "DISABLED" })).status,
+    ).toBe(422);
+  });
+
+  it("grants warehouse access and reports effective access", async () => {
+    const base = await start();
+    const id = (await call(base, "POST", "/users", jane)).body?.id as string;
+    await call(base, "PUT", `/users/${id}/roles/PICKER`);
+
+    expect(
+      (await call(base, "PUT", `/users/${id}/warehouses/${WAREHOUSE.toUpperCase()}`)).status,
+    ).toBe(204);
+    expect((await call(base, "GET", `/users/${id}/warehouses`)).body?.items).toEqual([WAREHOUSE]);
+    expect(
+      (await call(base, "PUT", `/users/${id}/warehouses/22222222-2222-4222-8222-222222222222`))
+        .status,
+    ).toBe(422);
+    expect((await call(base, "PUT", `/users/${id}/warehouses/not-a-uuid`)).status).toBe(400);
+
+    const access = await call(base, "GET", `/users/${id}/access`);
+    expect(access.status).toBe(200);
+    expect(access.body).toMatchObject({ allWarehouses: false, warehouseIds: [WAREHOUSE] });
+    expect(access.body?.permissions).toContain("inventory.read");
+    expect(access.body?.permissions).not.toContain("inventory.adjust");
+
+    expect((await call(base, "DELETE", `/users/${id}/warehouses/${WAREHOUSE}`)).status).toBe(204);
+    expect((await call(base, "DELETE", `/users/${id}/warehouses/${WAREHOUSE}`)).status).toBe(404);
+    expect(
+      (await call(base, "GET", `/users/00000000-0000-4000-8000-000000000000/access`)).status,
+    ).toBe(404);
+
+    await call(base, "PATCH", `/users/${id}`, { version: 1, status: "DISABLED" });
+    expect((await call(base, "GET", `/users/${id}/access`)).body).toEqual({
+      permissions: [],
+      allWarehouses: false,
+      warehouseIds: [],
+    });
   });
 });

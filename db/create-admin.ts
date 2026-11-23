@@ -1,4 +1,4 @@
-// Creates the first administrator account. Run `npm run migrate` first.
+// Creates the first administrator: an account that holds the ADMIN role. Run `npm run migrate` first.
 //            npm run create-admin -- --username admin --display-name "Site Administrator" [--email a@b.test]
 //      The password is asked for twice without echoing it. For scripts, set WMS_ADMIN_PASSWORD instead
 // (never put a password on the command line: it ends up in the shell history).
@@ -7,6 +7,7 @@ import "dotenv/config";
 import { parseArgs } from "node:util";
 import pg from "pg";
 import {
+  ADMIN_ROLE,
   createIdentityModule,
   PgIdentityRepository,
   ScryptPasswordHasher,
@@ -83,6 +84,12 @@ try {
     password,
   });
   if (!created.ok) throw created.error;
+  const granted = await identity.access.assignRole(created.value.id, ADMIN_ROLE);
+  if (!granted.ok) {
+    throw new Error(
+      `the account "${created.value.username}" was created but could not be made an administrator: ${granted.error.message}`,
+    );
+  }
   console.log(`created the administrator "${created.value.username}" (${created.value.id})`);
 } catch (e) {
   console.error("could not create the administrator:", e instanceof Error ? e.message : e);

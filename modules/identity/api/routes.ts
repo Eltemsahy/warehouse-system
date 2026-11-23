@@ -1,14 +1,17 @@
 import { Router, type Response } from "express";
 import { z } from "zod";
 import type { Result } from "../../../shared/kernel/index.js";
+import type { AccessService } from "../application/access-service.js";
 import type { UserService } from "../application/user-service.js";
 import { ConflictError, NotFoundError, type IdentityError } from "../domain/errors.js";
 import {
   EMAIL_PATTERN,
   LOCALE_PATTERN,
+  ROLE_CODE_PATTERN,
   USERNAME_MESSAGE,
   USERNAME_PATTERN,
   USER_STATUSES,
+  type Role,
   type UserAccount,
 } from "../domain/model.js";
 
@@ -22,6 +25,9 @@ const hasChanges = (body: Record<string, unknown>) =>
   Object.keys(body).some((k) => k !== "version");
 
 const params = z.object({ id });
+const roleCode = z.string().regex(ROLE_CODE_PATTERN, "must be a role code such as PICKER");
+const roleParams = z.object({ id, role: roleCode });
+const warehouseParams = z.object({ id, warehouseId: z.string().uuid() });
 // The password policy (length, not the username) is a rule, so it answers 422 from the service.
 const createUser = z
   .object({
@@ -65,6 +71,15 @@ const present = (u: UserAccount) => ({
   version: u.version,
 });
 
+const presentRole = (r: Role) => ({
+  code: r.code,
+  name: r.name,
+  description: r.description,
+  isSystem: r.isSystem,
+  allWarehouses: r.allWarehouses,
+  permissions: r.permissions,
+});
+
 function statusOf(error: IdentityError): number {
   if (error instanceof NotFoundError) return 404;
   if (error instanceof ConflictError) return 409;
@@ -81,14 +96,21 @@ function send<T>(
   return res.status(statusOf(result.error)).json({ error: result.error.message });
 }
 
+function noContent(res: Response, result: Result<null, IdentityError>): Response {
+  if (result.ok) return res.status(204).end();
+  return res.status(statusOf(result.error)).json({ error: result.error.message });
+}
+
 export interface IdentityRouteDeps {
   users: UserService;
+  access: AccessService;
 }
 
 /**
  * Mounted at /identity. A body or query that does not validate answers 400; a missing user 404;
  * a taken username or email, or a stale version, 409; a broken rule (such as a weak password) 422.
- * PATCH must send the `version` it last read. Usernames can never be changed.
+ * PATCH must send the `version` it last read. Usernames can never be changed. Roles and
+ * permissions are fixed (ADR 0005): the API lists them and assigns roles, nothing more.
  */
 export function identityRoutes(deps: IdentityRouteDeps) {
   const r = Router();
@@ -125,9 +147,64 @@ export function identityRoutes(deps: IdentityRouteDeps) {
     if (!p.success) return res.status(400).json(p.error.flatten());
     const body = setPassword.safeParse(req.body);
     if (!body.success) return res.status(400).json(body.error.flatten());
-    const result = await deps.users.setPassword(p.data.id, body.data.password);
-    if (!result.ok) return res.status(statusOf(result.error)).json({ error: result.error.message });
-    return res.status(204).end();
+    return noContent(res, await deps.users.setPassword(p.data.id, body.data.password));
+  });
+
+  // ---- roles, permissions and warehouse access (ADR 0005)
+
+  r.get("/permissions", async (_req, res) =>
+    res.json({ items: await deps.access.listPermissions() }),
+  );
+
+  r.get("/roles", async (_req, res) =>
+    res.json({ items: (await deps.access.listRoles()).map(presentRole) }),
+  );
+
+  r.get("/users/:id/roles", async (req, res) => {
+    const p = params.safeParse(req.params);
+    if (!p.success) return res.status(400).json(p.error.flatten());
+    return send(res, await deps.access.rolesOf(p.data.id), 200, (roles) => ({
+      items: roles.map(presentRole),
+    }));
+  });
+
+  r.put("/users/:id/roles/:role", async (req, res) => {
+    const p = roleParams.safeParse(req.params);
+    if (!p.success) return res.status(400).json(p.error.flatten());
+    return noContent(res, await deps.access.assignRole(p.data.id, p.data.role));
+  });
+
+  r.delete("/users/:id/roles/:role", async (req, res) => {
+    const p = roleParams.safeParse(req.params);
+    if (!p.success) return res.status(400).json(p.error.flatten());
+    return noContent(res, await deps.access.removeRole(p.data.id, p.data.role));
+  });
+
+  r.get("/users/:id/warehouses", async (req, res) => {
+    const p = params.safeParse(req.params);
+    if (!p.success) return res.status(400).json(p.error.flatten());
+    return send(res, await deps.access.warehousesOf(p.data.id), 200, (items) => ({ items }));
+  });
+
+  r.put("/users/:id/warehouses/:warehouseId", async (req, res) => {
+    const p = warehouseParams.safeParse(req.params);
+    if (!p.success) return res.status(400).json(p.error.flatten());
+    return noContent(res, await deps.access.grantWarehouse(p.data.id, p.data.warehouseId));
+  });
+
+  r.delete("/users/:id/warehouses/:warehouseId", async (req, res) => {
+    const p = warehouseParams.safeParse(req.params);
+    if (!p.success) return res.status(400).json(p.error.flatten());
+    return noContent(res, await deps.access.revokeWarehouse(p.data.id, p.data.warehouseId));
+  });
+
+  /** What the user may do and where, from all their roles and grants. Empty for a disabled user. */
+  r.get("/users/:id/access", async (req, res) => {
+    const p = params.safeParse(req.params);
+    if (!p.success) return res.status(400).json(p.error.flatten());
+    const user = await deps.users.get(p.data.id);
+    if (!user.ok) return res.status(statusOf(user.error)).json({ error: user.error.message });
+    return res.json(await deps.access.accessFor(p.data.id));
   });
 
   return r;
