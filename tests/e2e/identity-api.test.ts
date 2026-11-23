@@ -27,7 +27,7 @@ async function call(base: string, method: string, path: string, body?: unknown) 
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   const text = await res.text();
-  return { status: res.status, body: text ? (JSON.parse(text) as Record<string, any>) : null };
+  return { status: res.status, body: text ? (JSON.parse(text) as Record<string, unknown>) : null };
 }
 
 const jane = {
