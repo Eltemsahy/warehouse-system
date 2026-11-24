@@ -6,7 +6,13 @@ import {
   type UserAccount,
   type UserStatus,
 } from "../domain/model.js";
-import type { IdentityRepository, PasswordHasher, UserFilter, UserPage } from "./ports.js";
+import type {
+  IdentityRepository,
+  PasswordHasher,
+  SessionRepository,
+  UserFilter,
+  UserPage,
+} from "./ports.js";
 import {
   attempt,
   emailProblem,
@@ -45,6 +51,8 @@ export class UserService {
   constructor(
     private repo: IdentityRepository,
     private hasher: PasswordHasher,
+    /** When given, disabling a user or resetting their password ends their sessions. */
+    private sessions?: SessionRepository,
   ) {}
 
   async create(i: CreateUserInput): Promise<Result<UserAccount, IdentityError>> {
@@ -99,7 +107,12 @@ export class UserService {
     if (next.status === "DISABLED" && (await isLastActiveAdmin(this.repo, current))) {
       return violation("the last active administrator cannot be disabled");
     }
-    return attempt(() => this.repo.updateUser(next, i.version));
+    const updated = await attempt(() => this.repo.updateUser(next, i.version));
+    if (updated.ok && current.status !== "DISABLED" && next.status === "DISABLED") {
+      // Re-enabling the account later must not bring old sessions back to life.
+      await this.sessions?.revokeUserSessions(id, new Date());
+    }
+    return updated;
   }
 
   /** Sets a new password without asking for the old one: an administrator's reset. */
@@ -113,6 +126,8 @@ export class UserService {
     const saved = await attempt(() =>
       this.repo.setPassword(id, passwordHash, this.hasher.algorithm),
     );
-    return saved.ok ? ok(null) : saved;
+    if (!saved.ok) return saved;
+    await this.sessions?.revokeUserSessions(id, new Date());
+    return ok(null);
   }
 }

@@ -1,9 +1,16 @@
-import { Router, type Response } from "express";
+import { Router, type Request, type Response } from "express";
 import { z } from "zod";
 import type { Result } from "../../../shared/kernel/index.js";
 import type { AccessService } from "../application/access-service.js";
+import type { AuthService } from "../application/auth-service.js";
 import type { UserService } from "../application/user-service.js";
-import { ConflictError, NotFoundError, type IdentityError } from "../domain/errors.js";
+import {
+  AuthenticationError,
+  ConflictError,
+  NotFoundError,
+  TooManyAttemptsError,
+  type IdentityError,
+} from "../domain/errors.js";
 import {
   EMAIL_PATTERN,
   LOCALE_PATTERN,
@@ -11,6 +18,7 @@ import {
   USERNAME_MESSAGE,
   USERNAME_PATTERN,
   USER_STATUSES,
+  type Principal,
   type Role,
   type UserAccount,
 } from "../domain/model.js";
@@ -50,6 +58,13 @@ const updateUser = z
   .strict()
   .refine(hasChanges, "nothing to update");
 const setPassword = z.object({ password: z.string() }).strict();
+// Bounded so nobody can make the server hash a megabyte; the real password policy is the service's.
+const login = z
+  .object({ username: z.string().min(1).max(100), password: z.string().min(1).max(1024) })
+  .strict();
+const changeOwnPassword = z
+  .object({ currentPassword: z.string().min(1).max(1024), newPassword: z.string().max(1024) })
+  .strict();
 const listQuery = z
   .object({
     status: z.enum(USER_STATUSES).optional(),
@@ -81,9 +96,18 @@ const presentRole = (r: Role) => ({
 });
 
 function statusOf(error: IdentityError): number {
+  if (error instanceof AuthenticationError) return 401;
+  if (error instanceof TooManyAttemptsError) return 429;
   if (error instanceof NotFoundError) return 404;
   if (error instanceof ConflictError) return 409;
   return 422;
+}
+
+function fail(res: Response, error: IdentityError): Response {
+  if (error instanceof TooManyAttemptsError)
+    res.setHeader("Retry-After", String(error.retryAfterSeconds));
+  if (error instanceof AuthenticationError) res.setHeader("WWW-Authenticate", "Bearer");
+  return res.status(statusOf(error)).json({ error: error.message });
 }
 
 function send<T>(
@@ -93,27 +117,98 @@ function send<T>(
   present: (v: T) => unknown,
 ): Response {
   if (result.ok) return res.status(status).json(present(result.value));
-  return res.status(statusOf(result.error)).json({ error: result.error.message });
+  return fail(res, result.error);
 }
 
 function noContent(res: Response, result: Result<null, IdentityError>): Response {
   if (result.ok) return res.status(204).end();
-  return res.status(statusOf(result.error)).json({ error: result.error.message });
+  return fail(res, result.error);
 }
 
 export interface IdentityRouteDeps {
   users: UserService;
   access: AccessService;
+  auth: AuthService;
 }
 
 /**
  * Mounted at /identity. A body or query that does not validate answers 400; a missing user 404;
  * a taken username or email, or a stale version, 409; a broken rule (such as a weak password) 422.
+ * Login answers 401 for any bad credentials, in the same words, and 429 with Retry-After when a
+ * username or address has failed too often.
  * PATCH must send the `version` it last read. Usernames can never be changed. Roles and
  * permissions are fixed (ADR 0005): the API lists them and assigns roles, nothing more.
  */
+/** The session token from "Authorization: Bearer <token>", or undefined. */
+function bearerToken(req: Request): string | undefined {
+  const match = /^Bearer ([^\s]+)$/i.exec(req.header("Authorization") ?? "");
+  return match?.[1];
+}
+
 export function identityRoutes(deps: IdentityRouteDeps) {
   const r = Router();
+
+  /** The caller from the bearer token, or null after answering 401. */
+  async function signedIn(req: Request, res: Response): Promise<Principal | null> {
+    const token = bearerToken(req);
+    const who = token === undefined ? null : await deps.auth.authenticate(token);
+    if (!who) {
+      fail(res, new AuthenticationError("authentication required"));
+      return null;
+    }
+    return who;
+  }
+
+  // ---- login and sessions (ADR 0006). These routes read the token themselves; protecting the
+  // other routes with it comes in a later step.
+
+  r.post("/login", async (req, res) => {
+    const body = login.safeParse(req.body);
+    if (!body.success) return res.status(400).json(body.error.flatten());
+    const result = await deps.auth.login({ ...body.data, ip: req.ip ?? null });
+    res.setHeader("Cache-Control", "no-store"); // the response holds a token
+    return send(res, result, 200, ({ token, expiresAt, user }) => ({
+      token,
+      tokenType: "Bearer",
+      expiresAt,
+      user: present(user),
+    }));
+  });
+
+  r.post("/logout", async (req, res) => {
+    const who = await signedIn(req, res);
+    if (!who) return res;
+    await deps.auth.logout(who.sessionId);
+    return res.status(204).end();
+  });
+
+  /** Who am I, what may I do and where, and when does this session end. */
+  r.get("/me", async (req, res) => {
+    const who = await signedIn(req, res);
+    if (!who) return res;
+    const user = await deps.users.get(who.userId);
+    if (!user.ok) return fail(res, user.error);
+    return res.json({
+      user: present(user.value),
+      access: who.access,
+      session: { expiresAt: who.expiresAt },
+    });
+  });
+
+  r.put("/me/password", async (req, res) => {
+    const who = await signedIn(req, res);
+    if (!who) return res;
+    const body = changeOwnPassword.safeParse(req.body);
+    if (!body.success) return res.status(400).json(body.error.flatten());
+    return noContent(res, await deps.auth.changePassword(who, body.data, req.ip ?? null));
+  });
+
+  /** A forced sign-out: ends every session of the user. */
+  r.delete("/users/:id/sessions", async (req, res) => {
+    const p = params.safeParse(req.params);
+    if (!p.success) return res.status(400).json(p.error.flatten());
+    return noContent(res, await deps.auth.revokeSessions(p.data.id));
+  });
 
   r.post("/users", async (req, res) => {
     const body = createUser.safeParse(req.body);
@@ -203,7 +298,7 @@ export function identityRoutes(deps: IdentityRouteDeps) {
     const p = params.safeParse(req.params);
     if (!p.success) return res.status(400).json(p.error.flatten());
     const user = await deps.users.get(p.data.id);
-    if (!user.ok) return res.status(statusOf(user.error)).json({ error: user.error.message });
+    if (!user.ok) return fail(res, user.error);
     return res.json(await deps.access.accessFor(p.data.id));
   });
 

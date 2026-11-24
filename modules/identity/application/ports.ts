@@ -2,6 +2,7 @@ import type {
   Credential,
   Permission,
   Role,
+  Session,
   UserAccess,
   UserAccount,
   UserStatus,
@@ -80,4 +81,36 @@ export interface IdentityRepository {
 /** Tells identity whether a warehouse exists. Implemented in the composition root. */
 export interface WarehouseDirectory {
   exists(warehouseId: string): Promise<boolean>;
+}
+
+export interface NewSession {
+  id: string;
+  userId: string;
+  /** SHA-256 of the token, in hex. The token itself is never stored. */
+  tokenHash: string;
+  issuedAt: Date;
+  expiresAt: Date;
+}
+
+export interface LoginAttempt {
+  /** Lower-cased and cut to 100 characters; may name a user that does not exist. */
+  username: string;
+  ip: string | null;
+  success: boolean;
+  at: Date;
+}
+
+/** Sessions and login attempts (ADR 0006). Times come from the caller, never from the database. */
+export interface SessionRepository {
+  createSession(session: NewSession): Promise<void>;
+  findSessionByTokenHash(tokenHash: string): Promise<Session | null>;
+  /** True when the session existed and was not yet revoked. */
+  revokeSession(id: string, at: Date): Promise<boolean>;
+  /** Revokes every session of the user not yet revoked, except one. Returns how many. */
+  revokeUserSessions(userId: string, at: Date, exceptSessionId?: string): Promise<number>;
+  recordLoginAttempt(attempt: LoginAttempt): Promise<void>;
+  /** Failures for this username since `since`, ignoring those before its latest success. */
+  countUsernameFailures(username: string, since: Date): Promise<number>;
+  /** Failures from this address since `since`. A success does not reset them. */
+  countIpFailures(ip: string, since: Date): Promise<number>;
 }

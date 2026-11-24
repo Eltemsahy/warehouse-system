@@ -188,3 +188,22 @@ export const SYSTEM_ROLES: readonly Role[] = [
     "inventory.read",
   ]),
 ].sort((a, b) => (a.code < b.code ? -1 : 1));
+
+// ---- sessions (ADR 0006)
+
+export interface Session {
+  id: string;
+  userId: string;
+  issuedAt: Date;
+  expiresAt: Date;
+  revokedAt: Date | null;
+}
+
+/** Who is calling, resolved from a valid session. */
+export interface Principal {
+  userId: string;
+  username: string;
+  sessionId: string;
+  expiresAt: Date;
+  access: UserAccess;
+}

@@ -249,4 +249,67 @@ describe.skipIf(!enabled)("identity schema (postgres)", () => {
       ).toBe(UNIQUE_VIOLATION);
     });
   });
+
+  describe("sessions and login attempts", () => {
+    const newUserId = async () => {
+      const id = randomUUID();
+      await pool.query(
+        "INSERT INTO identity.user_account (id, username, display_name) VALUES ($1, $2, 'T')",
+        [id, `user.${uniq()}`],
+      );
+      return id;
+    };
+    const hash = () => randomUUID().replaceAll("-", "") + randomUUID().replaceAll("-", "");
+    const addSession = (userId: string, tokenHash: string, hours = 12) =>
+      pool.query(
+        `INSERT INTO identity.session (id, user_id, token_hash, issued_at, expires_at)
+         VALUES ($1, $2, $3, now(), now() + make_interval(hours => $4))`,
+        [randomUUID(), userId, tokenHash, hours],
+      );
+
+    it("stores a session only for an existing user", async () => {
+      expect(await sqlState(addSession(randomUUID(), hash()))).toBe(FOREIGN_KEY_VIOLATION);
+      expect(await sqlState(addSession(await newUserId(), hash()))).toBeUndefined();
+    });
+
+    it("keeps token hashes well formed and unique", async () => {
+      const user = await newUserId();
+      const h = hash();
+      expect(await sqlState(addSession(user, "not-a-hash"))).toBe(CHECK_VIOLATION);
+      expect(await sqlState(addSession(user, h.toUpperCase()))).toBe(CHECK_VIOLATION);
+      expect(await sqlState(addSession(user, h))).toBeUndefined();
+      expect(await sqlState(addSession(user, h))).toBe(UNIQUE_VIOLATION);
+    });
+
+    it("refuses a session that ends before it starts", async () => {
+      expect(await sqlState(addSession(await newUserId(), hash(), -1))).toBe(CHECK_VIOLATION);
+    });
+
+    it("records login attempts and never lets one be modified", async () => {
+      const name = `attempt.${uniq()}`;
+      expect(
+        await sqlState(
+          pool.query(
+            "INSERT INTO identity.login_attempt (username, ip, success, at) VALUES ($1, '10.0.0.1', false, now())",
+            [name],
+          ),
+        ),
+      ).toBeUndefined();
+      expect(
+        await sqlState(
+          pool.query(
+            "INSERT INTO identity.login_attempt (username, ip, success, at) VALUES ($1, NULL, true, now())",
+            [name],
+          ),
+        ),
+      ).toBeUndefined();
+      expect(
+        await sqlState(
+          pool.query("UPDATE identity.login_attempt SET success = true WHERE username = $1", [
+            name,
+          ]),
+        ),
+      ).toBe(INTEGRITY_VIOLATION);
+    });
+  });
 });

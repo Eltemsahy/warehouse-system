@@ -20,14 +20,21 @@ async function start() {
   return serve(app);
 }
 
-async function call(base: string, method: string, path: string, body?: unknown) {
+async function call(base: string, method: string, path: string, body?: unknown, token?: string) {
   const res = await fetch(`${base}/identity${path}`, {
     method,
-    headers: { "content-type": "application/json" },
+    headers: {
+      "content-type": "application/json",
+      ...(token ? { authorization: `Bearer ${token}` } : {}),
+    },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   const text = await res.text();
-  return { status: res.status, body: text ? (JSON.parse(text) as Record<string, unknown>) : null };
+  return {
+    status: res.status,
+    headers: res.headers,
+    body: text ? (JSON.parse(text) as Record<string, any>) : null,
+  };
 }
 
 const jane = {
@@ -205,5 +212,83 @@ describe("identity API", () => {
       allWarehouses: false,
       warehouseIds: [],
     });
+  });
+
+  async function signedIn(base: string, username = "jane.doe", password = jane.password) {
+    const res = await call(base, "POST", "/login", { username, password });
+    return { res, token: (res.body?.token ?? "") as string };
+  }
+
+  it("signs in, says who you are, and signs out", async () => {
+    const base = await start();
+    const id = (await call(base, "POST", "/users", jane)).body?.id as string;
+    await call(base, "PUT", `/users/${id}/roles/PICKER`);
+
+    const { res, token } = await signedIn(base);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("cache-control")).toBe("no-store");
+    expect(res.body).toMatchObject({ tokenType: "Bearer", user: { username: "jane.doe" } });
+    expect(token.startsWith("wms_")).toBe(true);
+    expect(JSON.stringify(res.body)).not.toMatch(/scrypt/);
+
+    const me = await call(base, "GET", "/me", undefined, token);
+    expect(me.status).toBe(200);
+    expect(me.body).toMatchObject({ user: { id }, access: { allWarehouses: false } });
+    expect(me.body?.access.permissions).toContain("inventory.read");
+
+    expect((await call(base, "GET", "/me")).status).toBe(401);
+    expect((await call(base, "GET", "/me", undefined, "wms_" + "A".repeat(43))).status).toBe(401);
+    expect((await call(base, "POST", "/logout", undefined, token)).status).toBe(204);
+    expect((await call(base, "GET", "/me", undefined, token)).status).toBe(401);
+  });
+
+  it("answers bad credentials with 401 in the same words, and locks out after repeated failures", async () => {
+    const base = await start();
+    await call(base, "POST", "/users", jane);
+
+    const wrong = await signedIn(base, "jane.doe", "not the password");
+    const unknown = await signedIn(base, "nobody.here", "not the password");
+    expect(wrong.res.status).toBe(401);
+    expect(wrong.res.headers.get("www-authenticate")).toBe("Bearer");
+    expect(unknown.res.body).toEqual(wrong.res.body);
+    expect((await call(base, "POST", "/login", { username: "jane.doe" })).status).toBe(400);
+
+    for (let i = 0; i < 4; i++) await signedIn(base, "jane.doe", "still wrong");
+    const locked = await signedIn(base, "jane.doe"); // the right password, but too late
+    expect(locked.res.status).toBe(429);
+    expect(Number(locked.res.headers.get("retry-after"))).toBeGreaterThan(0);
+  });
+
+  it("changes your own password and ends your other sessions", async () => {
+    const base = await start();
+    await call(base, "POST", "/users", jane);
+    const [a, b] = [await signedIn(base), await signedIn(base)];
+
+    const body = { currentPassword: jane.password, newPassword: "a brand new passphrase" };
+    expect((await call(base, "PUT", "/me/password", body)).status).toBe(401);
+    expect(
+      (await call(base, "PUT", "/me/password", { ...body, currentPassword: "wrong" }, a.token))
+        .status,
+    ).toBe(422);
+    expect(
+      (await call(base, "PUT", "/me/password", { ...body, newPassword: "short" }, a.token)).status,
+    ).toBe(422);
+    expect((await call(base, "PUT", "/me/password", body, a.token)).status).toBe(204);
+
+    expect((await call(base, "GET", "/me", undefined, a.token)).status).toBe(200); // this one stays
+    expect((await call(base, "GET", "/me", undefined, b.token)).status).toBe(401); // the other ended
+    expect((await signedIn(base)).res.status).toBe(401); // the old password
+    expect((await signedIn(base, "jane.doe", body.newPassword)).res.status).toBe(200);
+  });
+
+  it("lets an administrator end all of a user's sessions", async () => {
+    const base = await start();
+    const id = (await call(base, "POST", "/users", jane)).body?.id as string;
+    const { token } = await signedIn(base);
+    expect((await call(base, "DELETE", `/users/${id}/sessions`)).status).toBe(204);
+    expect((await call(base, "GET", "/me", undefined, token)).status).toBe(401);
+    expect(
+      (await call(base, "DELETE", `/users/00000000-0000-4000-8000-000000000000/sessions`)).status,
+    ).toBe(404);
   });
 });

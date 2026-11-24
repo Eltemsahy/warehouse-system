@@ -24,3 +24,19 @@ export class RuleViolationError extends IdentityError {
     this.name = "RuleViolationError";
   }
 }
+
+/** Wrong credentials, or no valid session. Maps to 401. Never says which part was wrong. */
+export class AuthenticationError extends IdentityError {
+  constructor(message = "invalid username or password") {
+    super(message);
+    this.name = "AuthenticationError";
+  }
+}
+
+/** Too many failed attempts for this username or address. Maps to 429. */
+export class TooManyAttemptsError extends IdentityError {
+  constructor(readonly retryAfterSeconds: number) {
+    super("too many failed attempts, try again later");
+    this.name = "TooManyAttemptsError";
+  }
+}
