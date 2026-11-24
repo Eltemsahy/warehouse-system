@@ -15,6 +15,11 @@ export interface IdempotencyOptions {
   required?: boolean;
   /** Who owns the key. Keys are scoped per caller. Default "anonymous" (until auth exists). */
   principal?: (req: Request) => string;
+  /**
+   * Requests the middleware must leave alone: no key is read and nothing is stored. Use it for
+   * anything whose body or response holds a secret (passwords, session tokens).
+   */
+  skip?: (req: Request) => boolean;
 }
 
 /** Same JSON with object keys sorted, so key order in a retried body doesn't matter. */
@@ -89,7 +94,7 @@ export function idempotency(
   const principal = options.principal ?? (() => "anonymous");
 
   return async (req, res, next) => {
-    if (!MUTATING.has(req.method)) return next();
+    if (!MUTATING.has(req.method) || options.skip?.(req)) return next();
     try {
       const key = req.header(IDEMPOTENCY_HEADER);
       if (key === undefined) {

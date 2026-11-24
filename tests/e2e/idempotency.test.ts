@@ -184,6 +184,17 @@ describe("idempotency middleware", () => {
     expect(r.headers.get("idempotent-replayed")).toBeNull();
   });
 
+  it("leaves skipped requests alone: the key is ignored and nothing is stored", async () => {
+    const { calls, post } = await setup({ skip: (req) => req.path === "/things" });
+    const key = randomUUID();
+    await post(key);
+    const second = await post(key);
+    expect(second.headers.get("idempotent-replayed")).toBeNull();
+    expect(calls.count).toBe(2);
+    // A key that would be refused elsewhere is not even looked at.
+    expect((await post("not valid, it has spaces")).status).toBe(201);
+  });
+
   it("returns 400 for a missing key when required, and for an invalid key", async () => {
     const { post } = await setup({ required: true });
     expect((await post()).status).toBe(400);

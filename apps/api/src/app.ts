@@ -27,7 +27,9 @@ import {
 import {
   createIdentityModule,
   InMemoryIdentityRepository,
+  InMemorySessionRepository,
   PgIdentityRepository,
+  PgSessionRepository,
 } from "../../../modules/identity/index.js";
 import {
   createLocationsModule,
@@ -56,6 +58,7 @@ function createPersistence() {
       locationsRepository: new PgLocationsRepository(pool),
       catalogRepository: new PgCatalogRepository(pool),
       identityRepository: new PgIdentityRepository(pool),
+      sessionRepository: new PgSessionRepository(pool),
       readiness,
     };
   }
@@ -69,6 +72,7 @@ function createPersistence() {
     locationsRepository: new InMemoryLocationsRepository(),
     catalogRepository: new InMemoryCatalogRepository(),
     identityRepository: new InMemoryIdentityRepository(),
+    sessionRepository: new InMemorySessionRepository(),
     readiness,
   };
 }
@@ -76,6 +80,12 @@ function createPersistence() {
 /** Composition root: the only place modules are wired together. */
 export function buildApp() {
   const app = express();
+  // Behind a reverse proxy every request comes from the proxy's address unless Express is told
+  // how many proxies to trust, and the per-address login limit would then lock everyone out
+  // together. Set TRUST_PROXY to the number of proxies in front of the app (0 or unset: none).
+  const proxyHops = Number.parseInt(process.env.TRUST_PROXY ?? "0", 10);
+  if (proxyHops > 0) app.set("trust proxy", proxyHops);
+
   const lifecycle = { shuttingDown: false };
   const isShuttingDown = () => lifecycle.shuttingDown;
 
@@ -87,6 +97,7 @@ export function buildApp() {
     locationsRepository,
     catalogRepository,
     identityRepository,
+    sessionRepository,
     readiness,
   } = createPersistence();
 
@@ -101,13 +112,17 @@ export function buildApp() {
 
   // Replaying a request with the same Idempotency-Key returns the original response
   // and never runs a second write (TRD s5.5). Must come after express.json().
-  app.use(idempotency(idempotencyStore));
+  // Identity is left out: its requests carry passwords and its responses carry session tokens,
+  // which must never be stored. Its writes are safe to repeat anyway (unique usernames,
+  // idempotent role grants, versioned updates).
+  app.use(idempotency(idempotencyStore, { skip: (req) => req.path.startsWith("/identity") }));
 
   const locations = createLocationsModule({ repository: locationsRepository });
   const catalog = createCatalogModule({ repository: catalogRepository });
   // Access grants name warehouses: identity asks locations whether they exist (soft reference).
   const identity = createIdentityModule({
     repository: identityRepository,
+    sessions: sessionRepository,
     warehouses: { exists: async (id) => (await locations.getWarehouse(id)) !== null },
   });
 
