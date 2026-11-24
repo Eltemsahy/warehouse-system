@@ -8,6 +8,12 @@ afterAll(closeServers);
 
 const WAREHOUSE = "11111111-1111-4111-8111-111111111111";
 
+type IdentityApiResponseBody = Record<string, unknown> & {
+  access?: {
+    permissions?: string[];
+  };
+};
+
 async function start() {
   const m = createIdentityModule({
     hasher: new ScryptPasswordHasher({ N: 2 ** 10, r: 8, p: 1 }),
@@ -33,7 +39,7 @@ async function call(base: string, method: string, path: string, body?: unknown, 
   return {
     status: res.status,
     headers: res.headers,
-    body: text ? (JSON.parse(text) as Record<string, any>) : null,
+    body: text ? (JSON.parse(text) as IdentityApiResponseBody) : null,
   };
 }
 
@@ -234,7 +240,7 @@ describe("identity API", () => {
     const me = await call(base, "GET", "/me", undefined, token);
     expect(me.status).toBe(200);
     expect(me.body).toMatchObject({ user: { id }, access: { allWarehouses: false } });
-    expect(me.body?.access.permissions).toContain("inventory.read");
+    expect(me.body?.access?.permissions).toContain("inventory.read");
 
     expect((await call(base, "GET", "/me")).status).toBe(401);
     expect((await call(base, "GET", "/me", undefined, "wms_" + "A".repeat(43))).status).toBe(401);
