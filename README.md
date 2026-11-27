@@ -10,6 +10,8 @@ A modular monolith for warehouse and logistics operations, built with TypeScript
 - [Configuration](#configuration)
 - [Database setup](#database-setup)
 - [Running the app](#running-the-app)
+- [Signing in and access](#signing-in-and-access)
+- [Audit trail](#audit-trail)
 - [API](#api)
 - [How it works](#how-it-works)
 - [Project layout](#project-layout)
@@ -58,6 +60,7 @@ Set up a database (see [Database setup](#database-setup)), then:
 
 ```bash
 npm run migrate
+npm run create-admin -- --username admin --display-name "Site Administrator"   # asks for a password
 npm run dev
 ```
 
@@ -67,20 +70,23 @@ Check that it is up:
 curl localhost:3000/health/ready
 ```
 
-You should get `{"status":"ready","checks":{"database":"ok"}}`. Then try the [API](#api). The frontend is a separate app, see [Running the app](#running-the-app).
+You should get `{"status":"ready","checks":{"database":"ok"}}`. Every route except the health checks and login needs a signed-in user, so [sign in](#signing-in-and-access) before trying the [API](#api). The frontend is a separate app, see [Running the app](#running-the-app).
 
 ## Configuration
 
 Settings come from environment variables. Copy `.env.example` to `.env` and edit it: the API, the migration and ledger-check scripts, and the tests all load `.env` automatically (through `dotenv`). A variable that is already set in your shell wins over `.env`.
 
-| Variable                    | Default                                 | Purpose                                                                 |
-| --------------------------- | --------------------------------------- | ----------------------------------------------------------------------- |
-| `PORT`                      | `3000`                                  | Port the API listens on                                                 |
-| `DATABASE_URL`              | `postgres://wms:wms@localhost:5432/wms` | PostgreSQL connection string                                            |
-| `LEDGER_DRIVER`             | `postgres`                              | `postgres` or `memory` (see [In-memory mode](#in-memory-mode))          |
-| `LEDGER_INTEGRITY_HOUR_UTC` | `2`                                     | Hour (0 to 23, UTC) of the nightly ledger integrity check               |
-| `LOG_LEVEL`                 | `info`                                  | `debug`, `info`, `warn` or `error`                                      |
-| `RUN_MIGRATIONS`            | `true`                                  | Docker image only: set to `false` to skip migrations at container start |
+| Variable                    | Default                                 | Purpose                                                                                                                             |
+| --------------------------- | --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `PORT`                      | `3000`                                  | Port the API listens on                                                                                                             |
+| `DATABASE_URL`              | `postgres://wms:wms@localhost:5432/wms` | PostgreSQL connection string                                                                                                        |
+| `LEDGER_DRIVER`             | `postgres`                              | `postgres` or `memory` (see [In-memory mode](#in-memory-mode))                                                                      |
+| `LEDGER_INTEGRITY_HOUR_UTC` | `2`                                     | Hour (0 to 23, UTC) of the nightly ledger integrity check                                                                           |
+| `LOG_LEVEL`                 | `info`                                  | `debug`, `info`, `warn` or `error`                                                                                                  |
+| `RUN_MIGRATIONS`            | `true`                                  | Docker image only: set to `false` to skip migrations at container start                                                             |
+| `TRUST_PROXY`               | `0`                                     | Number of reverse proxies in front of the API. Set it behind a proxy, or the per-address login limit sees every client as the proxy |
+| `DEV_ADMIN_PASSWORD`        | (unset)                                 | In-memory mode only: creates an administrator at startup with this password                                                         |
+| `DEV_ADMIN_USERNAME`        | `admin`                                 | In-memory mode only: that administrator's username                                                                                  |
 
 ## Database setup
 
@@ -142,16 +148,17 @@ The API listens on http://localhost:3000 and restarts when you change a file. St
 
 ### In-memory mode
 
-To run without a database, use the in-memory ledger. Data lives only while the app runs, and the nightly integrity check and the database readiness check are not active.
+To run without a database, use the in-memory ledger. Data lives only while the app runs (users included, which is why `DEV_ADMIN_PASSWORD` creates an administrator at every start), and the nightly integrity check and the database readiness check are not active.
 
 ```bash
-LEDGER_DRIVER=memory npm run dev
+LEDGER_DRIVER=memory DEV_ADMIN_PASSWORD='a long dev passphrase' npm run dev
 ```
 
 ```powershell
 $env:LEDGER_DRIVER = "memory"
+$env:DEV_ADMIN_PASSWORD = "a long dev passphrase"
 npm run dev
-Remove-Item Env:LEDGER_DRIVER   # afterwards, so the setting does not stay for this session
+Remove-Item Env:LEDGER_DRIVER, Env:DEV_ADMIN_PASSWORD   # afterwards, so the settings do not stay for this session
 ```
 
 ### Production build
@@ -173,6 +180,57 @@ npm run web:dev     # usually http://localhost:5173
 
 Or work inside the folder directly: `cd apps/web-admin`, then `npm install` and `npm run dev`.
 
+## Signing in and access
+
+Every route except `GET /health`, `GET /health/ready` and `POST /identity/login` needs a signed-in user, and each route needs a permission (docs: `docs/adr/0005-access-control.md`, `0006-sessions-and-login.md`, `0007-route-protection.md`). There is no way to switch this off.
+
+Create the first administrator once, after `npm run migrate` (it asks for the password twice without showing it; for scripts set `WMS_ADMIN_PASSWORD` instead, never put it on the command line):
+
+```bash
+npm run create-admin -- --username admin --display-name "Site Administrator"
+```
+
+Sign in and keep the token (it lasts 12 hours; `POST /identity/logout` ends it early):
+
+```powershell
+$login = Invoke-RestMethod -Method Post http://localhost:3000/identity/login -ContentType "application/json" -Body (@{ username="admin"; password="<your password>" } | ConvertTo-Json)
+$token = $login.token
+$auth  = @{ Authorization = "Bearer $token" }   # pass as -Headers $auth
+```
+
+```bash
+curl -X POST localhost:3000/identity/login -H 'content-type: application/json' \
+  -d '{"username":"admin","password":"<your password>"}'
+TOKEN=<the "token" value from the reply>        # then send: -H "authorization: Bearer $TOKEN"
+```
+
+All the examples below send that header. Without a valid token a route answers `401`; with one but without the permission, or for a warehouse the user cannot enter, `403`. Five wrong passwords for a username in 15 minutes lock it for a while (`429` with `Retry-After`).
+
+What a user may do comes from their roles; where, from their warehouse access (administrators see every warehouse):
+
+| Role                   | May                                                        |
+| ---------------------- | ---------------------------------------------------------- |
+| `ADMIN`                | Everything, in every warehouse, including users and access |
+| `WAREHOUSE_MANAGER`    | Locations and stock changes, read the catalog and users    |
+| `INVENTORY_CONTROLLER` | Adjust and transfer stock, read locations and the catalog  |
+| `PUTAWAY_OPERATOR`     | Transfer stock, read locations and the catalog             |
+| `RECEIVER`, `PICKER`   | Read stock, locations and the catalog                      |
+| `PACKER`               | Read stock and the catalog                                 |
+
+Give a user a role and a warehouse with `PUT /identity/users/:id/roles/:role` and `PUT /identity/users/:id/warehouses/:warehouseId`; `GET /identity/me` shows what the signed-in user may do.
+
+## Audit trail
+
+Every stock movement records who made it (`created_by`), and the master data and user tables record who created and who last changed each row. Every successful change a signed-in user makes through the API is also written to an append-only audit log: who, what (the method and route), which thing, when, from which address, and under which request id. Request bodies are never stored, so passwords cannot end up there.
+
+Every response carries an `X-Request-Id` header (send your own to keep a proxy's id); the same id is stored with the audit entry. Administrators can read the log:
+
+```powershell
+Invoke-RestMethod -Headers $auth "http://localhost:3000/audit/entries?entity=zones&limit=20"
+```
+
+Filters: `actorId`, `entity`, `entityId`, `action`, `since` (an ISO date-time). Entries come newest first; pass `nextBefore` from a reply as `before` for the next page. Reading needs the `audit.read` permission, which only `ADMIN` has. See `docs/adr/0008-audit-trail-and-request-context.md`.
+
 ## API
 
 | Method | Path                                                                         | Purpose                                                                                 |
@@ -189,44 +247,44 @@ Request bodies are JSON. Inventory only takes stock for a warehouse, SKU and loc
 
 ```bash
 # 1. Master data. Copy the warehouse "id" from the first reply into WH.
-curl -X POST localhost:3000/locations/warehouses -H 'content-type: application/json' \
+curl -H "authorization: Bearer $TOKEN" -X POST localhost:3000/locations/warehouses -H 'content-type: application/json' \
   -d '{"code":"CAI-1","name":"Cairo DC"}'
 WH=<the id from the reply above>
-curl -X POST localhost:3000/catalog/items -H 'content-type: application/json' \
+curl -H "authorization: Bearer $TOKEN" -X POST localhost:3000/catalog/items -H 'content-type: application/json' \
   -d '{"sku":"SKU-1","description":"Test item","baseUom":"EA"}'
-curl -X POST localhost:3000/locations/warehouses/$WH/locations -H 'content-type: application/json' \
+curl -H "authorization: Bearer $TOKEN" -X POST localhost:3000/locations/warehouses/$WH/locations -H 'content-type: application/json' \
   -d '{"code":"A-01","type":"BIN"}'
-curl -X POST localhost:3000/locations/warehouses/$WH/locations -H 'content-type: application/json' \
+curl -H "authorization: Bearer $TOKEN" -X POST localhost:3000/locations/warehouses/$WH/locations -H 'content-type: application/json' \
   -d '{"code":"B-02","type":"BIN"}'
 
 # 2. Stock.
-curl -X POST localhost:3000/inventory/warehouses/$WH/adjustments -H 'content-type: application/json' \
+curl -H "authorization: Bearer $TOKEN" -X POST localhost:3000/inventory/warehouses/$WH/adjustments -H 'content-type: application/json' \
   -d '{"sku":"SKU-1","locationId":"A-01","delta":10,"reason":"initial count"}'
 
-curl -X POST localhost:3000/inventory/warehouses/$WH/transfers -H 'content-type: application/json' \
+curl -H "authorization: Bearer $TOKEN" -X POST localhost:3000/inventory/warehouses/$WH/transfers -H 'content-type: application/json' \
   -d '{"sku":"SKU-1","from":"A-01","to":"B-02","quantity":4}'
 
-curl localhost:3000/inventory/warehouses/$WH/skus/SKU-1/locations/A-01/balance
+curl -H "authorization: Bearer $TOKEN" localhost:3000/inventory/warehouses/$WH/skus/SKU-1/locations/A-01/balance
 ```
 
 ```powershell
 # 1. Master data.
 $json = @{ ContentType = "application/json" }
-$wh = (Invoke-RestMethod -Method Post http://localhost:3000/locations/warehouses @json -Body (@{ code="CAI-1"; name="Cairo DC" } | ConvertTo-Json)).id
-Invoke-RestMethod -Method Post http://localhost:3000/catalog/items @json -Body (@{ sku="SKU-1"; description="Test item"; baseUom="EA" } | ConvertTo-Json)
+$wh = (Invoke-RestMethod -Headers $auth -Method Post http://localhost:3000/locations/warehouses @json -Body (@{ code="CAI-1"; name="Cairo DC" } | ConvertTo-Json)).id
+Invoke-RestMethod -Headers $auth -Method Post http://localhost:3000/catalog/items @json -Body (@{ sku="SKU-1"; description="Test item"; baseUom="EA" } | ConvertTo-Json)
 foreach ($code in "A-01", "B-02") {
-  Invoke-RestMethod -Method Post http://localhost:3000/locations/warehouses/$wh/locations @json -Body (@{ code=$code; type="BIN" } | ConvertTo-Json)
+  Invoke-RestMethod -Headers $auth -Method Post http://localhost:3000/locations/warehouses/$wh/locations @json -Body (@{ code=$code; type="BIN" } | ConvertTo-Json)
 }
 
 # 2. Stock.
 $body = @{ sku="SKU-1"; locationId="A-01"; delta=10; reason="initial count" } | ConvertTo-Json
-Invoke-RestMethod -Method Post http://localhost:3000/inventory/warehouses/$wh/adjustments -ContentType "application/json" -Body $body
+Invoke-RestMethod -Headers $auth -Method Post http://localhost:3000/inventory/warehouses/$wh/adjustments -ContentType "application/json" -Body $body
 
 $t = @{ sku="SKU-1"; from="A-01"; to="B-02"; quantity=4 } | ConvertTo-Json
-Invoke-RestMethod -Method Post http://localhost:3000/inventory/warehouses/$wh/transfers -ContentType "application/json" -Body $t
+Invoke-RestMethod -Headers $auth -Method Post http://localhost:3000/inventory/warehouses/$wh/transfers -ContentType "application/json" -Body $t
 
-Invoke-RestMethod http://localhost:3000/inventory/warehouses/$wh/skus/SKU-1/locations/A-01/balance   # expect 6
-Invoke-RestMethod http://localhost:3000/inventory/warehouses/$wh/skus/SKU-1/locations/B-02/balance   # expect 4
+Invoke-RestMethod -Headers $auth http://localhost:3000/inventory/warehouses/$wh/skus/SKU-1/locations/A-01/balance   # expect 6
+Invoke-RestMethod -Headers $auth http://localhost:3000/inventory/warehouses/$wh/skus/SKU-1/locations/B-02/balance   # expect 4
 ```
 
 An overdraw (for example `delta=-100`) returns `422` with an insufficient-stock error. PowerShell throws on any 4xx response, so that failure is the expected result.
@@ -247,10 +305,10 @@ An overdraw (for example `delta=-100`) returns `422` with an insufficient-stock 
 Updates (`PATCH`) must send the `version` you last read. If someone changed the record meanwhile you get `409` and should re-read. Codes (and a location's warehouse) can never be changed: a body that contains them is rejected with `400`. Retire a record with `"isActive": false` (or a warehouse with `"status": "INACTIVE"`) instead of deleting it. Locations list in code order; pass the returned `nextAfter` as `after` for the next page (`limit` 1 to 200, default 50), and filter with `zoneId`, `type`, `status` and `active`.
 
 ```bash
-curl -X POST localhost:3000/locations/warehouses -H 'content-type: application/json' \
+curl -H "authorization: Bearer $TOKEN" -X POST localhost:3000/locations/warehouses -H 'content-type: application/json' \
   -d '{"code":"CAI-1","name":"Cairo DC","timezone":"Africa/Cairo"}'
 # use the returned id as :warehouseId
-curl -X POST localhost:3000/locations/warehouses/<id>/locations -H 'content-type: application/json' \
+curl -H "authorization: Bearer $TOKEN" -X POST localhost:3000/locations/warehouses/<id>/locations -H 'content-type: application/json' \
   -d '{"code":"A-01-02","type":"BIN","storageClasses":["AMBIENT"]}'
 ```
 
@@ -272,7 +330,7 @@ curl -X POST localhost:3000/locations/warehouses/<id>/locations -H 'content-type
 Updates (`PATCH`) must send the `version` you last read; a stale one gives `409`. SKUs, codes and an item's base unit can never be changed, and neither can the tracking flags (`isLotTracked`, `isSerialTracked`, `hasExpiry`) once the item exists: a body that contains them is rejected with `400`. Retire an item with `"status": "INACTIVE"`. Stock is counted in whole numbers of the base unit, and each unit says how many base units it holds (`qtyInBase`; the base unit is always 1). A barcode identifies an item in one unit, so scanning a case barcode returns the item and `qtyInBase` 12. Barcodes match exactly (case-sensitive), are unique across all items, cannot be edited (remove and add instead), and an inactive item still scans, with its status shown. Percent-encode a `/` inside a SKU or barcode when you put it in a URL.
 
 ```bash
-curl -X POST localhost:3000/catalog/items -H 'content-type: application/json' \
+curl -H "authorization: Bearer $TOKEN" -X POST localhost:3000/catalog/items -H 'content-type: application/json' \
   -d '{"sku":"JAM-1","description":"Strawberry jam","baseUom":"EA","units":[{"uom":"CS","qtyInBase":12}]}'
 ```
 
@@ -291,7 +349,7 @@ Send an `Idempotency-Key` header (1 to 255 printable characters, for example a U
 Keys are remembered for 24 hours. Successful responses and 4xx rejections are stored and replayed; a `5xx` is not, so the client can retry. A replay returns the stored status and JSON body.
 
 ```bash
-curl -X POST localhost:3000/inventory/warehouses/$WH/adjustments -H 'content-type: application/json' \
+curl -H "authorization: Bearer $TOKEN" -X POST localhost:3000/inventory/warehouses/$WH/adjustments -H 'content-type: application/json' \
   -H 'Idempotency-Key: demo-1' \
   -d '{"sku":"SKU-1","locationId":"A-01","delta":5,"reason":"idempotency demo"}'
 # send it again: same response, Idempotent-Replayed: true, and the balance rises by 5 only once
@@ -350,25 +408,26 @@ tests/             unit/, contract/, e2e/, helpers/
 
 ## Scripts
 
-| Script                 | What it does                                                                          |
-| ---------------------- | ------------------------------------------------------------------------------------- |
-| `npm run dev`          | Starts the API with auto-restart (`tsx watch`)                                        |
-| `npm run build`        | Compiles the API to `dist/` and copies the SQL migrations next to it                  |
-| `npm start`            | Runs the compiled API (`dist/apps/api/src/main.js`)                                   |
-| `npm run migrate`      | Applies pending migrations (development, via `tsx`)                                   |
-| `npm run migrate:prod` | Applies pending migrations from the compiled build                                    |
-| `npm run seed`         | Loads the demo data (development only; safe to run again)                             |
-| `npm run check:ledger` | Runs the ledger integrity check once (exit 0 consistent, 1 mismatch, 2 could not run) |
-| `npm test`             | Runs all tests with Vitest                                                            |
-| `npm run typecheck`    | Type-checks without emitting (`tsc --noEmit`)                                         |
-| `npm run lint`         | ESLint                                                                                |
-| `npm run lint:deps`    | Verifies module boundaries (dependency-cruiser)                                       |
-| `npm run format`       | Formats the code with Prettier                                                        |
-| `npm run format:check` | Fails if anything is not formatted (this is what CI runs)                             |
-| `npm run web:install`  | Installs the frontend's dependencies (`apps/web-admin`)                               |
-| `npm run web:dev`      | Starts the frontend dev server                                                        |
-| `npm run web:build`    | Builds the frontend                                                                   |
-| `npm run web:lint`     | Lints the frontend                                                                    |
+| Script                 | What it does                                                                                    |
+| ---------------------- | ----------------------------------------------------------------------------------------------- |
+| `npm run dev`          | Starts the API with auto-restart (`tsx watch`)                                                  |
+| `npm run build`        | Compiles the API to `dist/` and copies the SQL migrations next to it                            |
+| `npm start`            | Runs the compiled API (`dist/apps/api/src/main.js`)                                             |
+| `npm run migrate`      | Applies pending migrations (development, via `tsx`)                                             |
+| `npm run migrate:prod` | Applies pending migrations from the compiled build                                              |
+| `npm run create-admin` | Creates the first administrator (asks for a password; see [Signing in](#signing-in-and-access)) |
+| `npm run seed`         | Loads the demo data (development only; safe to run again)                                       |
+| `npm run check:ledger` | Runs the ledger integrity check once (exit 0 consistent, 1 mismatch, 2 could not run)           |
+| `npm test`             | Runs all tests with Vitest                                                                      |
+| `npm run typecheck`    | Type-checks without emitting (`tsc --noEmit`)                                                   |
+| `npm run lint`         | ESLint                                                                                          |
+| `npm run lint:deps`    | Verifies module boundaries (dependency-cruiser)                                                 |
+| `npm run format`       | Formats the code with Prettier                                                                  |
+| `npm run format:check` | Fails if anything is not formatted (this is what CI runs)                                       |
+| `npm run web:install`  | Installs the frontend's dependencies (`apps/web-admin`)                                         |
+| `npm run web:dev`      | Starts the frontend dev server                                                                  |
+| `npm run web:build`    | Builds the frontend                                                                             |
+| `npm run web:lint`     | Lints the frontend                                                                              |
 
 ## Testing
 
