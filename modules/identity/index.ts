@@ -53,7 +53,14 @@ export type {
   PasswordHasher,
   WarehouseDirectory,
 } from "./application/ports.js";
-export { ADMIN_ROLE, can, NO_ACCESS, type Principal, type UserAccess } from "./domain/model.js";
+export {
+  ADMIN_ROLE,
+  can,
+  NO_ACCESS,
+  PERMISSIONS,
+  type Principal,
+  type UserAccess,
+} from "./domain/model.js";
 export type { CreateUserInput, UpdateUserInput } from "./application/user-service.js";
 export type { AuthOptions } from "./application/auth-service.js";
 export { InMemoryIdentityRepository } from "./infrastructure/in-memory-identity-repository.js";

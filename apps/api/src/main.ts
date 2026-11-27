@@ -4,7 +4,8 @@ import { pool } from "./db.js";
 import { createShutdown } from "./lifecycle.js";
 import { logger } from "../../../shared/observability/index.js";
 
-const { app, relay, jobs, beginShutdown } = buildApp();
+const { app, relay, jobs, beginShutdown, bootstrap } = buildApp();
+await bootstrap();
 relay.start();
 for (const job of jobs) job.start();
 

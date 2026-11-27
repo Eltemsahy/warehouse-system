@@ -10,6 +10,7 @@ import {
   InMemoryIdempotencyStore,
   PgIdempotencyStore,
 } from "../../../shared/http/index.js";
+import { InMemoryAuditTrail, PgAuditTrail } from "../../../shared/audit/index.js";
 import { DailyJob } from "../../../shared/jobs/index.js";
 import { logger } from "../../../shared/observability/index.js";
 import {
@@ -25,6 +26,7 @@ import {
   PgCatalogRepository,
 } from "../../../modules/catalog/index.js";
 import {
+  ADMIN_ROLE,
   createIdentityModule,
   InMemoryIdentityRepository,
   InMemorySessionRepository,
@@ -36,6 +38,10 @@ import {
   InMemoryLocationsRepository,
   PgLocationsRepository,
 } from "../../../modules/locations/index.js";
+import { accessRules } from "./access-rules.js";
+import { auditMutations } from "./audit.js";
+import { auditRoutes } from "./audit-routes.js";
+import { assignRequestId, enterContext } from "./request-context.js";
 import { config } from "./config.js";
 import { pool } from "./db.js";
 import {
@@ -45,6 +51,7 @@ import {
   notFoundHandler,
   type ReadinessCheck,
 } from "./http.js";
+import { principalOf, protect } from "./security.js";
 
 /** The ledger, the outbox, the idempotency records and the auditor share one store. */
 function createPersistence() {
@@ -59,6 +66,7 @@ function createPersistence() {
       catalogRepository: new PgCatalogRepository(pool),
       identityRepository: new PgIdentityRepository(pool),
       sessionRepository: new PgSessionRepository(pool),
+      auditTrail: new PgAuditTrail(pool),
       readiness,
     };
   }
@@ -73,6 +81,7 @@ function createPersistence() {
     catalogRepository: new InMemoryCatalogRepository(),
     identityRepository: new InMemoryIdentityRepository(),
     sessionRepository: new InMemorySessionRepository(),
+    auditTrail: new InMemoryAuditTrail(),
     readiness,
   };
 }
@@ -98,24 +107,13 @@ export function buildApp() {
     catalogRepository,
     identityRepository,
     sessionRepository,
+    auditTrail,
     readiness,
   } = createPersistence();
 
   // Probes first: cheap, unauthenticated, and unaffected by the middleware below.
   app.use(connectionCloseWhenShuttingDown(isShuttingDown));
   app.use(healthRouter({ checks: readiness, isShuttingDown }));
-
-  app.use(express.json());
-
-  const bus = new InMemoryEventBus();
-  bus.subscribe("inventory.StockAdjusted", (e) => logger.info("event", { name: e.name }));
-
-  // Replaying a request with the same Idempotency-Key returns the original response
-  // and never runs a second write (TRD s5.5). Must come after express.json().
-  // Identity is left out: its requests carry passwords and its responses carry session tokens,
-  // which must never be stored. Its writes are safe to repeat anyway (unique usernames,
-  // idempotent role grants, versioned updates).
-  app.use(idempotency(idempotencyStore, { skip: (req) => req.path.startsWith("/identity") }));
 
   const locations = createLocationsModule({ repository: locationsRepository });
   const catalog = createCatalogModule({ repository: catalogRepository });
@@ -125,6 +123,34 @@ export function buildApp() {
     sessions: sessionRepository,
     warehouses: { exists: async (id) => (await locations.getWarehouse(id)) !== null },
   });
+
+  // Nothing below this line is reachable without passing the rules in access-rules.ts: a valid
+  // session, the permission each route needs and, where it names a warehouse, access to that
+  // warehouse (ADR 0007). It comes before the body parser so unauthenticated bodies are never read.
+  app.use(assignRequestId);
+  app.use(protect({ rules: accessRules, authenticate: identity.authenticate }));
+
+  app.use(express.json());
+
+  // The caller and the request id, for everything below (created_by on rows and movements, the
+  // audit trail). After the body parser on purpose: see enterContext.
+  app.use(enterContext);
+  app.use(auditMutations(auditTrail));
+
+  const bus = new InMemoryEventBus();
+  bus.subscribe("inventory.StockAdjusted", (e) => logger.info("event", { name: e.name }));
+
+  // Replaying a request with the same Idempotency-Key returns the original response
+  // and never runs a second write (TRD s5.5). Must come after express.json(). Keys are kept
+  // per signed-in user. Identity is left out: its requests carry passwords and its responses
+  // carry session tokens, which must never be stored. Its writes are safe to repeat anyway
+  // (unique usernames, idempotent role grants, versioned updates).
+  app.use(
+    idempotency(idempotencyStore, {
+      principal: (req) => principalOf(req)?.userId ?? "anonymous",
+      skip: (req) => req.path.startsWith("/identity"),
+    }),
+  );
 
   // Inventory only takes stock for warehouses, locations and SKUs that exist in the master
   // data, and only adds stock to active ones (P1-5). The modules meet only here.
@@ -137,6 +163,7 @@ export function buildApp() {
   app.use("/locations", locations.router);
   app.use("/catalog", catalog.router);
   app.use("/identity", identity.router);
+  app.use("/audit", auditRoutes(auditTrail));
 
   // Subscribers only ever see committed events, delivered at least once, and a failing
   // subscriber is retried by the relay instead of failing the HTTP request (TRD G2, G3).
@@ -158,10 +185,35 @@ export function buildApp() {
   app.use(notFoundHandler);
   app.use(errorHandler);
 
+  // Without a database there is nothing for `npm run create-admin` to write to, so in-memory
+  // mode can create an administrator at startup instead. Development only.
+  const bootstrap = async () => {
+    if (config.LEDGER_DRIVER === "postgres") return;
+    const password = process.env.DEV_ADMIN_PASSWORD;
+    if (!password) {
+      logger.warn(
+        "in-memory mode: nobody can sign in. Set DEV_ADMIN_PASSWORD (and optionally DEV_ADMIN_USERNAME) to create an administrator at startup.",
+      );
+      return;
+    }
+    const username = process.env.DEV_ADMIN_USERNAME ?? "admin";
+    const created = await identity.users.create({
+      username,
+      displayName: "Development administrator",
+      password,
+    });
+    if (!created.ok) throw created.error;
+    const granted = await identity.access.assignRole(created.value.id, ADMIN_ROLE);
+    if (!granted.ok) throw granted.error;
+    logger.info("created the development administrator", { username });
+  };
+
   return {
     app,
     relay,
     jobs,
+    /** Run once before listening: creates the development administrator in in-memory mode. */
+    bootstrap,
     /** Flips /health/ready to 503 and asks clients to close their connections. */
     beginShutdown: () => {
       lifecycle.shuttingDown = true;
